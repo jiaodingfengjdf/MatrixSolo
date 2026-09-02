@@ -36,6 +36,78 @@ def test_kickoff_without_mentions_is_huddle():
     assert should_huddle(set(), "很好 大家先下班今天")
 
 
+def test_p2p_without_mention_is_not_huddle():
+    assert not should_huddle(set(), "介绍下你自己", chat_type="p2p")
+
+
+@pytest.mark.asyncio
+async def test_p2p_message_replies_with_same_role(monkeypatch):
+    from matrixsolo.feishu import chat
+
+    delivered: list[str] = []
+
+    async def fake_generate_reply(role: str, user_text: str, **kwargs: object):
+        return "你好，我是文案。", []
+
+    async def fake_deliver(role: str, *args: object, **kwargs: object) -> None:
+        delivered.append(role)
+
+    monkeypatch.setattr(chat, "resolve_role_from_event", lambda payload: "script")
+    monkeypatch.setattr(chat, "resolve_department_for_chat", lambda chat_id: None)
+    monkeypatch.setattr(chat, "_generate_reply", fake_generate_reply)
+    monkeypatch.setattr(chat, "_deliver", fake_deliver)
+
+    payload = {
+        "header": {"event_id": "evt-p2p-test"},
+        "event": {
+            "sender": {"sender_type": "user"},
+            "message": {
+                "chat_id": "oc_p2p",
+                "chat_type": "p2p",
+                "message_id": "om_p2p",
+                "message_type": "text",
+                "content": '{"text":"介绍下你自己"}',
+                "mentions": [],
+            },
+        },
+    }
+    result = await chat.handle_im_message(payload)
+    assert result["msg"] == "replied"
+    assert delivered == ["script"]
+
+
+@pytest.mark.asyncio
+async def test_unbound_group_warning_uses_receiver_role(monkeypatch):
+    from matrixsolo.feishu import chat
+
+    delivered: list[str] = []
+
+    async def fake_deliver(role: str, *args: object, **kwargs: object) -> None:
+        delivered.append(role)
+
+    monkeypatch.setattr(chat, "resolve_role_from_event", lambda payload: "script")
+    monkeypatch.setattr(chat, "resolve_department_for_chat", lambda chat_id: None)
+    monkeypatch.setattr(chat, "_deliver", fake_deliver)
+
+    payload = {
+        "header": {"event_id": "evt-group-test"},
+        "event": {
+            "sender": {"sender_type": "user"},
+            "message": {
+                "chat_id": "oc_group",
+                "chat_type": "group",
+                "message_id": "om_group",
+                "message_type": "text",
+                "content": '{"text":"今天开工"}',
+                "mentions": [],
+            },
+        },
+    }
+    result = await chat.handle_im_message(payload)
+    assert result["msg"] == "unbound-group"
+    assert delivered == ["script"]
+
+
 def test_huddle_job_skips_image_on_casual_chat():
     from matrixsolo.orchestration.huddle import huddle_job
 
@@ -129,6 +201,7 @@ def test_event_to_payload_reads_sdk_objects():
             ),
             message=SimpleNamespace(
                 chat_id="oc_1",
+                chat_type="p2p",
                 message_id="om_1",
                 message_type="text",
                 content='{"text":"@总编 开工"}',
@@ -138,6 +211,7 @@ def test_event_to_payload_reads_sdk_objects():
     )
     payload = event_to_payload(data, "cli_test")
     assert payload["event"]["message"]["message_id"] == "om_1"
+    assert payload["event"]["message"]["chat_type"] == "p2p"
     assert payload["event"]["message"]["mentions"][0]["name"] == "总编"
     assert payload["event"]["sender"]["sender_id"] == "ou_1"
     message = {

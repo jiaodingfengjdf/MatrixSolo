@@ -253,13 +253,18 @@ def huddle_leader(mentioned: set[str]) -> str:
     return "strategy"
 
 
-def should_huddle(mentioned: set[str], text: str) -> bool:
-    """群里不 @ 或 @ 多人 / 开工，都走五岗工作流。单独 @ 一岗才一对一。"""
+def should_huddle(
+    mentioned: set[str],
+    text: str,
+    *,
+    chat_type: str = "group",
+) -> bool:
+    """群里不 @ 或 @ 多人 / 开工都走五岗工作流；单聊始终一对一。"""
+    if (chat_type or "group").lower() == "p2p":
+        return False
     if HUDDLE_ASK.search(text or ""):
         return True
-    if len(mentioned) == 1:
-        return False
-    return True
+    return len(mentioned) != 1
 
 
 def message_stamp(chat_id: str, message_id: str, text: str) -> str:
@@ -416,6 +421,7 @@ async def handle_im_message(payload: dict[str, Any]) -> dict[str, Any]:
 
     text = extract_text(message)
     chat_id = message.get("chat_id") or ""
+    chat_type = (message.get("chat_type") or "group").lower()
     message_id = message.get("message_id") or ""
     file_key, file_name = _file_meta(message)
     if not chat_id:
@@ -439,12 +445,13 @@ async def handle_im_message(payload: dict[str, Any]) -> dict[str, Any]:
         return {"code": 0, "msg": "duplicate-message", "role": role}
 
     mentioned = extract_mentioned_roles(message)
-    huddle = should_huddle(mentioned, text)
+    huddle = should_huddle(mentioned, text, chat_type=chat_type)
     _trace_feishu(
         "in",
         role=role,
         mentioned=[str(r) for r in mentioned],
         huddle=huddle,
+        chat_type=chat_type,
         text=text[:120],
         message_id=message_id,
         stamp=stamp,
@@ -452,7 +459,7 @@ async def handle_im_message(payload: dict[str, Any]) -> dict[str, Any]:
     if huddle:
         if not department:
             await _deliver(
-                "strategy",
+                role,
                 chat_id,
                 message_id,
                 "这个群还没绑定部门。先在后台「部门与群」绑定 chat_id 再开工。",
@@ -818,6 +825,7 @@ def event_to_payload(data: Any, app_id: str) -> dict[str, Any]:
             },
             "message": {
                 "chat_id": _plain(_obj_get(message, "chat_id")),
+                "chat_type": _plain(_obj_get(message, "chat_type")) or "group",
                 "message_id": _plain(_obj_get(message, "message_id")),
                 "message_type": _plain(_obj_get(message, "message_type")) or "text",
                 "content": content,
