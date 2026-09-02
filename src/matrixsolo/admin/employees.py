@@ -35,6 +35,8 @@ class Employee(BaseModel):
     avatar_name: str = ""
     voice_id: str = ""
     portrait_asset_id: str = ""
+    digital_human_id: str = ""
+    digital_human_enabled: bool = False
     enabled: bool = True
     builtin: bool = False
     created_at: datetime = Field(default_factory=_utcnow)
@@ -59,6 +61,8 @@ class EmployeeCreate(BaseModel):
     avatar_name: str = ""
     voice_id: str = ""
     portrait_asset_id: str = ""
+    digital_human_id: str = ""
+    digital_human_enabled: bool = False
 
 
 class EmployeeUpdate(BaseModel):
@@ -71,6 +75,8 @@ class EmployeeUpdate(BaseModel):
     avatar_name: str | None = None
     voice_id: str | None = None
     portrait_asset_id: str | None = None
+    digital_human_id: str | None = None
+    digital_human_enabled: bool | None = None
 
 
 class EmployeePolishRequest(BaseModel):

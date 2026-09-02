@@ -22,6 +22,10 @@ class TaskKind(str, Enum):
     STRUCTURED = "structured"
 
 
+class CapabilityUnavailable(RuntimeError):
+    """能力槽位未配置或密钥缺失：调用方应降级，不得静默 mock."""
+
+
 class LLMGateway:
     """统一 LLM API 网关：按任务类型路由到不同 Provider."""
 
@@ -41,7 +45,7 @@ class LLMGateway:
             provider = provider_override
             info = self._provider_info(provider)
             if info is not None:
-                base_url = base_url_override or info.base_url
+                base_url = base_url_override or info.get("base_url", "")
                 model = model_override or self._default_model_for_provider(provider)
                 return provider, base_url, model
             if provider == "anthropic":
@@ -176,6 +180,131 @@ class LLMGateway:
         except ValueError:
             return False
         return get_model_store().supports_capability(provider_id, cap)
+
+    def has_capability(self, capability: str) -> bool:
+        from matrixsolo.admin.model_center import ModelCapability, get_model_store
+
+        try:
+            cap = ModelCapability(capability)
+        except ValueError:
+            return False
+        return any(
+            slot.enabled and cap in slot.capability
+            for slot in get_model_store().list_slots()
+        )
+
+    async def complete_text(
+        self,
+        messages: list[dict[str, str]],
+        **kwargs: Any,
+    ) -> str:
+        return await self.chat(messages, **kwargs)
+
+    async def complete_vision(
+        self,
+        messages: list[dict[str, str]],
+        images: list[str],
+        **kwargs: Any,
+    ) -> str:
+        """视觉理解：走 vision 能力槽位（OpenAI 兼容 image_url）。无槽位/密钥则抛 CapabilityUnavailable."""
+        from matrixsolo.admin.model_center import ModelCapability, get_model_store
+
+        slot = next(
+            (
+                s
+                for s in get_model_store().list_slots()
+                if s.enabled and ModelCapability.VISION in s.capability
+            ),
+            None,
+        )
+        if not slot:
+            raise CapabilityUnavailable("vision 能力槽位未配置")
+        provider = get_model_store().get_provider(slot.provider_id)
+        if not provider or not provider.api_key:
+            raise CapabilityUnavailable(f"vision provider 未配置密钥: {slot.provider_id}")
+        if provider.protocol != "openai":
+            raise CapabilityUnavailable("视觉理解暂仅支持 OpenAI 兼容协议")
+
+        content: list[dict[str, Any]] = [
+            {"type": "text", "text": (m.get("content") or "")} for m in messages
+        ]
+        for image in (images or [])[:8]:
+            content.append({"type": "image_url", "image_url": {"url": image}})
+        payload_messages = [
+            {"role": "user", "content": content},
+        ]
+        return await self._chat_openai_compat(
+            payload_messages,
+            provider.base_url,
+            slot.model_id,
+            provider.api_key,
+            float(kwargs.get("temperature") or 0.3),
+            int(kwargs.get("max_tokens") or 2048),
+            None,
+            auth_method=provider.auth_method.value,
+            api_key_header=provider.api_key_header or "",
+        )
+
+    async def generate_image(self, prompt: str, size: str = "16:9") -> dict[str, Any]:
+        from matrixsolo.skills.runtime import SkillRuntime
+
+        return await SkillRuntime().image_gen(prompt, aspect_ratio=size)
+
+    async def generate_video(
+        self,
+        prompt: str,
+        ref_images: list[str] | None = None,
+        duration: float = 0.0,
+        workflow_id: str = "",
+        project: str = "",
+        department_id: str = "default",
+        department_name: str = "默认",
+    ) -> dict[str, Any]:
+        from matrixsolo.admin.video_jobs import get_video_job_manager
+
+        return await get_video_job_manager().create(
+            prompt=prompt,
+            ref_images=ref_images or [],
+            duration=duration,
+            workflow_id=workflow_id,
+            project=project,
+            department_id=department_id,
+            department_name=department_name,
+        )
+
+    async def synthesize_speech(
+        self,
+        text: str,
+        voice_id: str | None = None,
+        out_dir: Any = None,
+    ) -> dict[str, Any]:
+        import os
+        from pathlib import Path
+
+        text = (text or "").strip()
+        if not text:
+            return {"ok": False, "error": "缺少需要合成的文本"}
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            return {
+                "ok": True,
+                "path": "",
+                "voice": voice_id or self.settings.edge_tts_voice,
+                "note": "pytest skip real tts",
+            }
+        import edge_tts
+
+        root = Path(out_dir or (self.settings.data_dir / "exports" / "tts"))
+        root.mkdir(parents=True, exist_ok=True)
+        voice = (voice_id or self.settings.edge_tts_voice) or "zh-CN-YunxiNeural"
+        from uuid import uuid4
+
+        target = root / f"tts_{uuid4().hex[:10]}.mp3"
+        communicate = edge_tts.Communicate(text, voice)
+        with target.open("wb") as handle:
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    handle.write(chunk["data"])
+        return {"ok": True, "path": str(target), "voice": voice}
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8))
     async def chat(

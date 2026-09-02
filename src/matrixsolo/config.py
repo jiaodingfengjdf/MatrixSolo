@@ -75,6 +75,9 @@ class Settings(BaseSettings):
     azure_speech_key: str = Field(default="", alias="AZURE_SPEECH_KEY")
     azure_speech_region: str = Field(default="", alias="AZURE_SPEECH_REGION")
     edge_tts_voice: str = Field(default="zh-CN-YunxiNeural", alias="EDGE_TTS_VOICE")
+    digital_human_mode: Literal["avatar", "slideshow"] = Field(
+        default="slideshow", alias="DIGITAL_HUMAN_MODE"
+    )
 
     mcp_host: str = Field(default="127.0.0.1", alias="MCP_HOST")
     mcp_port: int = Field(default=8765, alias="MCP_PORT")

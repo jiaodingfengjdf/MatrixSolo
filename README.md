@@ -60,7 +60,10 @@ pytest -q
   Skill 可执行闭环 + MCP stdio 最小可用、`data/admin/tool_audit.jsonl` 工具审计页
 - **P2 已落地**：部门实体与预置模板（头条图文/抖音/B站）、`chat_id` 唯一绑定、部门级 huddle 成员裁剪、
   部门级工作室记忆/日历/工作记录隔离、HITL 打到部门群、无 editor 模板跳过剪辑（copy_pack 终审）
-- P3 数字人 + vision/video 为后续里程碑
+- **P3 已落地（预留 + 接口）**：数字人资产登记（声线/形象参考/口播模板，默认关）、`data/admin/digital_humans.json`、
+  Gateway 能力方法 `complete_text / complete_vision / generate_image / generate_video / synthesize_speech`、
+  视频异步任务（未配置 video 槽位时失败可见于工作记录）、TTS 口播样片接口；
+  真实视频供应商与 vision/video 深度接入仍待决策
 
 ## 核心 API
 

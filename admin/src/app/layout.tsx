@@ -32,6 +32,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/models">模型中心</Link>
               <Link href="/worklogs">工作记录</Link>
               <Link href="/audit">工具审计</Link>
+              <Link href="/digitalhumans">数字人</Link>
               <Link href="/workflows">工作流看板</Link>
             </nav>
             <div className="meta">

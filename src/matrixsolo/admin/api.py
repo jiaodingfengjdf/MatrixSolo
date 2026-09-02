@@ -20,6 +20,11 @@ from matrixsolo.admin.departments import (
     DepartmentUpdate,
     get_department_store,
 )
+from matrixsolo.admin.digital_humans import (
+    DigitalHumanCreate,
+    DigitalHumanUpdate,
+    get_digital_human_store,
+)
 from matrixsolo.admin.model_center import (
     ModelProviderCreate,
     ModelProviderUpdate,
@@ -91,6 +96,25 @@ class PromptRollbackRequest(BaseModel):
 
 class PolishApplyRequest(BaseModel):
     draft: dict[str, str]
+
+
+class VideoGenerateRequest(BaseModel):
+    prompt: str
+    ref_images: list[str] = Field(default_factory=list)
+    duration: float = 0.0
+    workflow_id: str = ""
+    project: str = ""
+    department_id: str = "default"
+    department_name: str = "默认"
+
+
+class TtsGenerateRequest(BaseModel):
+    text: str
+    voice_id: str = ""
+
+
+class DigitalHumanPreviewRequest(BaseModel):
+    text: str = "这是 MatrixSolo 口播样片。开场三秒，先抛冲突。"
 
 
 @router.get("/agents")
@@ -431,6 +455,77 @@ async def list_tool_audit(
             tool=tool,
         )
     }
+
+
+# --------------------------------------------------------------------------- #
+# 数字人资产 + 多模态网关（PRD 模块 9 / 15）
+# --------------------------------------------------------------------------- #
+@router.get("/digital-humans")
+async def list_digital_humans() -> dict[str, Any]:
+    return {"items": [a.model_dump(mode="json") for a in get_digital_human_store().list()]}
+
+
+@router.post("/digital-humans")
+async def create_digital_human(body: DigitalHumanCreate) -> dict[str, Any]:
+    try:
+        asset = get_digital_human_store().create(body)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return asset.model_dump(mode="json")
+
+
+@router.put("/digital-humans/{asset_id}")
+async def update_digital_human(
+    asset_id: str, body: DigitalHumanUpdate
+) -> dict[str, Any]:
+    try:
+        asset = get_digital_human_store().update(asset_id, body)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return asset.model_dump(mode="json")
+
+
+@router.delete("/digital-humans/{asset_id}")
+async def delete_digital_human(asset_id: str) -> dict[str, Any]:
+    try:
+        get_digital_human_store().delete(asset_id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return {"ok": True}
+
+
+@router.post("/digital-humans/{asset_id}/preview")
+async def preview_digital_human(
+    asset_id: str, body: DigitalHumanPreviewRequest
+) -> dict[str, Any]:
+    asset = get_digital_human_store().get(asset_id)
+    if not asset:
+        raise HTTPException(404, f"digital human asset not found: {asset_id}")
+    from matrixsolo.gateway import get_gateway
+
+    return await get_gateway().synthesize_speech(body.text, voice_id=asset.voice_id or None)
+
+
+@router.post("/gateway/video")
+async def gateway_video(body: VideoGenerateRequest) -> dict[str, Any]:
+    from matrixsolo.gateway import get_gateway
+
+    return await get_gateway().generate_video(
+        prompt=body.prompt,
+        ref_images=body.ref_images,
+        duration=body.duration,
+        workflow_id=body.workflow_id,
+        project=body.project,
+        department_id=body.department_id,
+        department_name=body.department_name,
+    )
+
+
+@router.post("/gateway/tts")
+async def gateway_tts(body: TtsGenerateRequest) -> dict[str, Any]:
+    from matrixsolo.gateway import get_gateway
+
+    return await get_gateway().synthesize_speech(body.text, voice_id=body.voice_id or None)
 
 
 # --------------------------------------------------------------------------- #

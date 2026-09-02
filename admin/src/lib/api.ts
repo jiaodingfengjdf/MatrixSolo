@@ -127,6 +127,8 @@ export type Employee = {
   avatar_name: string;
   voice_id: string;
   portrait_asset_id: string;
+  digital_human_id: string;
+  digital_human_enabled: boolean;
   enabled: boolean;
   builtin: boolean;
   created_at: string;
@@ -167,6 +169,21 @@ export type RecentChat = {
   chat_id: string;
   last_text: string;
   ts: string;
+};
+
+export type DigitalHuman = {
+  id: string;
+  name: string;
+  provider: string;
+  voice_id: string;
+  portrait_asset_id: string;
+  portrait_path: string;
+  avatar_name: string;
+  opening_script: string;
+  subtitle_style: string;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -362,6 +379,32 @@ export const api = {
   unbindDepartmentChat: (id: string) =>
     request<Department>(`/api/admin/departments/${id}/unbind`, { method: "POST" }),
   recentChats: () => request<{ items: RecentChat[] }>("/api/admin/departments/recent-chats"),
+  // 数字人 / 多模态网关
+  listDigitalHumans: () => request<{ items: DigitalHuman[] }>("/api/admin/digital-humans"),
+  createDigitalHuman: (body: Partial<DigitalHuman>) =>
+    request<DigitalHuman>("/api/admin/digital-humans", { method: "POST", body: JSON.stringify(body) }),
+  updateDigitalHuman: (id: string, body: Partial<DigitalHuman>) =>
+    request<DigitalHuman>(`/api/admin/digital-humans/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  deleteDigitalHuman: (id: string) =>
+    request<{ ok: boolean }>(`/api/admin/digital-humans/${id}`, { method: "DELETE" }),
+  previewDigitalHuman: (id: string, text: string) =>
+    request<{ ok: boolean; path: string; voice: string; error?: string }>(
+      `/api/admin/digital-humans/${id}/preview`,
+      { method: "POST", body: JSON.stringify({ text }) },
+    ),
+  generateVideo: (body: { prompt: string; duration?: number; project?: string; workflow_id?: string }) =>
+    request<{ task_id: string; status: string }>("/api/admin/gateway/video", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  generateTts: (body: { text: string; voice_id?: string }) =>
+    request<{ ok: boolean; path: string; voice: string; error?: string }>("/api/admin/gateway/tts", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 };
 
 export type StudioBoard = {
