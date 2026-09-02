@@ -41,19 +41,17 @@ Windows PowerShell 一键启动后端（`uvicorn --reload`）+ 管理台（`next
 
 ```powershell
 # 一键启动
-.\scripts\dev-start.ps1
-# 或双击 scripts\dev-start.cmd
-#   双击 .cmd 后窗口会保留并实时滚动日志（Ctrl+C 仅停止查看，服务仍后台运行，
-#   停止服务请运行 scripts\dev-stop.ps1）
+.\scripts\dev-start.bat
+# 或直接双击 scripts\dev-start.bat（窗口保留，运行完按任意键关闭）
 
 # 一键停止（会整棵进程树停止，含 --reload 子进程）
-.\scripts\dev-stop.ps1
+.\scripts\dev-stop.bat
 ```
 
 脚本特性：自动复用项目 `.venv`（无则用全局 `python`）、端口占用时跳过避免重复启动、
 日志落 `data/logs/dev_*.log`、进程记录在 `data/admin/dev_processes.json`。
-可选参数：`-SkipBackend` / `-SkipAdmin` / `-SkipMcp` / `-NoReload`（关闭热重载便于调试）/
-`-Install`（启动前自动 `cd admin && npm install` 补齐依赖）/ `-Tail`（启动后前台实时滚动日志）。
+可选参数（.bat）：`-SkipBackend` / `-SkipAdmin` / `-SkipMcp` / `-NoReload`（关闭热重载便于调试）/
+`-Install`（启动前自动 `cd admin && npm install` 补齐依赖）。
 
 无 LLM Key 也可跑 mock：
 
