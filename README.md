@@ -46,9 +46,17 @@ pytest -q
 
 - 身份设定 / 能力边界 / 系统提示词
 - 工具能力开关 + 提示词 Skills 增删
-- 每岗 LLM provider/model/temperature
+- 每岗 LLM provider/model/temperature（Provider 可选模型中心注册的自定义源）
 - 每岗 MCP Server CRUD（http/sse/stdio）与工具探测
+- 模型中心：自定义 Provider、连通性探测、按能力槽位（text/vision/image/video/tts）配置
+- Prompt OS：L0 工作室守则可编辑、L2 分栏预览、人设版本历史与回滚
+- 每日工作记录：huddle / HITL / 生产 DAG 自动落本地 `data/admin/work_logs.jsonl`，可同步飞书 `FEISHU_TABLE_WORK_LOGS`
 - 配置落盘：`data/admin/agent_profiles.json`
+
+## 升级路线（见 [PRD-后续升级.md](./PRD-后续升级.md)）
+
+- **P0 已落地**：模型中心 / Prompt OS（L0 + 版本回滚）/ 每日工作记录 / 后台导航与总览 / Gateway 能力槽位
+- P1 员工入职向导与一键润色、P2 部门与多群隔离、P3 数字人 + vision/video 为后续里程碑
 
 ## 核心 API
 

@@ -4,6 +4,7 @@ import json
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from matrixsolo.admin.defaults import default_profiles
 from matrixsolo.admin.models import (
@@ -151,7 +152,66 @@ class ProfileStore:
             updated = AgentProfile.model_validate(data)
             profiles[role] = updated
             self._write(profiles)
+            self._record_version_if_changed(role, current, updated, source="manual")
             return updated
+
+    def _record_version_if_changed(
+        self,
+        role: str,
+        before: AgentProfile,
+        after: AgentProfile,
+        *,
+        source: str = "manual",
+        note: str = "",
+    ) -> None:
+        from matrixsolo.admin.prompt_os import (
+            get_prompt_version_store,
+            persona_snapshot,
+        )
+
+        if persona_snapshot(before) == persona_snapshot(after):
+            return
+        get_prompt_version_store().append(
+            role,
+            persona_snapshot(after),
+            note=note,
+            source=source,
+        )
+
+    def list_prompt_versions(self, role: str) -> list[dict[str, Any]]:
+        from matrixsolo.admin.prompt_os import get_prompt_version_store
+
+        return [
+            v.model_dump(mode="json")
+            for v in get_prompt_version_store().list(role)
+        ]
+
+    def rollback_prompt(self, role: str, version: int) -> AgentProfile:
+        from matrixsolo.admin.prompt_os import (
+            apply_snapshot,
+            get_prompt_version_store,
+            persona_snapshot,
+        )
+
+        with self._lock:
+            profiles = self._read()
+            if role not in profiles:
+                raise KeyError(role)
+            record = get_prompt_version_store().get_version(role, version)
+            if not record:
+                raise KeyError(f"prompt version not found: {role}@{version}")
+            current = profiles[role]
+            apply_snapshot(current, record.snapshot)
+            current.updated_at = datetime.now(timezone.utc)
+            profiles[role] = current
+            self._write(profiles)
+            get_prompt_version_store().append(
+                role,
+                persona_snapshot(current),
+                note=f"回滚到 v{version}",
+                source="rollback",
+            )
+            return current
 
     def add_skill(self, role: str, body: PromptSkillCreate) -> AgentProfile:
         with self._lock:

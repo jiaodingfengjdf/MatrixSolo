@@ -93,6 +93,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .badge.on { border-color: var(--ok); color: var(--ok); }
 .badge.off { border-color: var(--danger); color: var(--danger); }
+.link { color: var(--accent); cursor: pointer; }
+.link:hover { text-decoration: underline; }
 .tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
 .tabs button {
   background: transparent;

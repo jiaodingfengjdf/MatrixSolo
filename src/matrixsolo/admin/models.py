@@ -17,7 +17,8 @@ class AgentRoleKey(str, Enum):
 
 
 class LLMConfig(BaseModel):
-    provider: Literal["openai", "anthropic", "deepseek", "grsai"] = "grsai"
+    # 支持模型中心动态注册的任意 provider id（不绑定枚举）
+    provider: str = "grsai"
     model: str = "gpt-5.4"
     base_url: str = ""
     temperature: float = 0.7
@@ -107,47 +108,9 @@ class AgentProfile(BaseModel):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     def composed_system_prompt(self) -> str:
-        from matrixsolo.admin.personas import COLLEAGUES, STUDIO_VOICE
+        from matrixsolo.admin.prompt_os import compose_layered
 
-        parts = [
-            "## 活人感守则\n" + STUDIO_VOICE.strip(),
-            "## 工作室共识\n" + COLLEAGUES.strip(),
-        ]
-        if self.identity.strip():
-            parts.append(f"## 身份设定\n{self.identity.strip()}")
-        if self.personality.strip():
-            parts.append(f"## 专属性格\n{self.personality.strip()}")
-        if self.craft.strip():
-            parts.append(f"## 专属职业能力\n{self.craft.strip()}")
-        if self.work_style.strip():
-            parts.append(f"## 专属做事风格\n{self.work_style.strip()}")
-        if self.memory.strip():
-            parts.append(f"## 专属记忆\n{self.memory.strip()}")
-        if self.capability_boundary.strip():
-            parts.append(f"## 能力边界\n{self.capability_boundary.strip()}")
-        if self.system_prompt.strip():
-            parts.append(f"## 任务契约\n{self.system_prompt.strip()}")
-        enabled_tools = [t for t in self.tools if t.enabled]
-        if enabled_tools:
-            tool_lines = "\n".join(f"- {t.key}：{t.description or t.name}" for t in enabled_tools)
-            parts.append(
-                "## 已启用内置技能\n"
-                f"{tool_lines}\n"
-                "热榜/选题必须自己用 hot_radar 或 web_fetch，禁止问老板要片名，也不要把爬虫甩给运营。"
-            )
-        enabled_skills = [s for s in self.skills if s.enabled and s.content.strip()]
-        if enabled_skills:
-            skill_block = "\n\n".join(
-                f"### Skill: {s.name}\n{s.content.strip()}" for s in enabled_skills
-            )
-            parts.append(f"## 已启用 Skills\n{skill_block}")
-        enabled_mcp = [m for m in self.mcp_servers if m.enabled]
-        if enabled_mcp:
-            mcp_lines = "\n".join(
-                f"- {m.name} ({m.transport}) {m.url or m.command}" for m in enabled_mcp
-            )
-            parts.append(f"## 已接入 MCP\n{mcp_lines}")
-        return "\n\n".join(p for p in parts if p)
+        return compose_layered(self)
 
     def has_tool(self, key: str) -> bool:
         for t in self.tools:

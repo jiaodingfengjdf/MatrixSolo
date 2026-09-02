@@ -208,6 +208,18 @@ class ProductionOrchestrator:
             wf.status = WorkflowStatus.COMPLETED
             wf.log("工作流完成")
             self.store.save(wf)
+            from matrixsolo.admin.work_logs import record_work_log
+
+            await record_work_log(
+                project=(wf.selected_topic.film_name if wf.selected_topic else "") or "工作流",
+                work_type="workflow",
+                status="done",
+                summary=f"生产 DAG 完成：{wf.trigger} / {wf.content_form.value}",
+                workflow_id=wf.workflow_id,
+                stage="distribute",
+                employee_id="ops",
+                employee_title="运营",
+            )
             return {**state, "workflow": _dump(wf)}
 
         def route_start(state: GraphState) -> str:
@@ -358,6 +370,7 @@ class ProductionOrchestrator:
             else:
                 state.status = WorkflowStatus.CANCELLED
             self.store.save(state)
+            await self._record_hitl_log(workflow_id, stage, action_enum, state, {"action": "cancel"})
             return state
 
         # topic_reroll/custom go straight to strategy without apply_topic
@@ -368,13 +381,38 @@ class ProductionOrchestrator:
             else:
                 state.topic_custom_note = payload.get("note") or state.topic_custom_note
 
-        return await self._ainvoke(
+        new_state = await self._ainvoke(
             {
                 "workflow": _dump(state),
                 "entry": entry,
                 "hitl_action": action_enum.value,
                 "hitl_payload": payload,
             }
+        )
+        await self._record_hitl_log(workflow_id, stage, action_enum, new_state, payload)
+        return new_state
+
+    async def _record_hitl_log(
+        self,
+        workflow_id: str,
+        stage: str,
+        action: HitlAction,
+        state: WorkflowState,
+        payload: dict[str, Any],
+    ) -> None:
+        from matrixsolo.admin.work_logs import record_work_log
+
+        project = (state.selected_topic.film_name if state.selected_topic else "") or "工作流"
+        await record_work_log(
+            project=project,
+            work_type="hitl",
+            status="blocked" if state.status.value.startswith("awaiting_") else "done",
+            summary=f"HITL-{stage} {action.value}",
+            workflow_id=workflow_id,
+            stage=stage,
+            employee_id="strategy",
+            employee_title="总编",
+            extra=payload,
         )
 
     async def auto_approve_demo(self, workflow_id: str) -> WorkflowState:

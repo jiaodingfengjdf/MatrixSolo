@@ -39,6 +39,11 @@ class LLMGateway:
         s = self.settings
         if provider_override:
             provider = provider_override
+            info = self._provider_info(provider)
+            if info is not None:
+                base_url = base_url_override or info.base_url
+                model = model_override or self._default_model_for_provider(provider)
+                return provider, base_url, model
             if provider == "anthropic":
                 return (
                     provider,
@@ -61,6 +66,16 @@ class LLMGateway:
                 "openai",
                 base_url_override or s.openai_base_url,
                 model_override or s.openai_model,
+            )
+
+        # 全局默认也可指向模型中心自定义 Provider
+        default_provider = s.llm_default_provider or "grsai"
+        default_info = self._provider_info(default_provider)
+        if default_info and default_provider not in {"openai", "anthropic", "deepseek", "grsai"}:
+            return (
+                default_provider,
+                base_url_override or default_info.get("base_url", ""),
+                model_override or self._default_model_for_provider(default_provider),
             )
 
         # 显式默认底座优先
@@ -91,7 +106,59 @@ class LLMGateway:
             return "grsai", s.grsai_base_url, s.grsai_model
         return "openai", s.openai_base_url, s.openai_model
 
+    def _provider_info(self, provider_id: str) -> dict[str, Any] | None:
+        """从模型中心注册表解析 Provider；未注册回退 settings（内置）。"""
+        from matrixsolo.admin.model_center import get_model_store
+
+        provider = get_model_store().get_provider(provider_id)
+        if provider:
+            return {
+                "base_url": provider.base_url,
+                "protocol": provider.protocol,
+                "auth_method": provider.auth_method.value,
+                "api_key": provider.api_key,
+                "api_key_header": provider.api_key_header or "",
+            }
+        s = self.settings
+        table = {
+            "grsai": (s.grsai_base_url, "openai", "bearer", s.grsai_api_key, ""),
+            "openai": (s.openai_base_url, "openai", "bearer", s.openai_api_key, ""),
+            "anthropic": (s.anthropic_base_url, "anthropic", "anthropic", s.anthropic_api_key, ""),
+            "deepseek": (s.deepseek_base_url, "openai", "bearer", s.deepseek_api_key, ""),
+        }
+        row = table.get(provider_id)
+        if row:
+            return {
+                "base_url": row[0],
+                "protocol": row[1],
+                "auth_method": row[2],
+                "api_key": row[3],
+                "api_key_header": row[4],
+            }
+        return None
+
+    def _default_model_for_provider(self, provider_id: str) -> str:
+        from matrixsolo.admin.model_center import get_model_store
+
+        slot = get_model_store().resolve_slot(provider_id)
+        if slot:
+            return slot.model_id
+        s = self.settings
+        return {
+            "grsai": s.grsai_model,
+            "openai": s.openai_model,
+            "anthropic": s.anthropic_model,
+            "deepseek": s.deepseek_model,
+        }.get(provider_id, "")
+
+    def provider_protocol(self, provider_id: str) -> str:
+        info = self._provider_info(provider_id)
+        return (info or {}).get("protocol", "openai")
+
     def _api_key(self, provider: str) -> str:
+        info = self._provider_info(provider)
+        if info:
+            return info.get("api_key") or ""
         s = self.settings
         if provider == "anthropic":
             return s.anthropic_api_key
@@ -100,6 +167,15 @@ class LLMGateway:
         if provider == "grsai":
             return s.grsai_api_key
         return s.openai_api_key
+
+    def supports_capability(self, provider_id: str, capability: str) -> bool:
+        from matrixsolo.admin.model_center import ModelCapability, get_model_store
+
+        try:
+            cap = ModelCapability(capability)
+        except ValueError:
+            return False
+        return get_model_store().supports_capability(provider_id, cap)
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8))
     async def chat(
@@ -126,7 +202,8 @@ class LLMGateway:
             logger.warning("No LLM API key configured; returning mock response")
             return self._mock_response(messages, kind)
 
-        if resolved_provider == "anthropic":
+        info = self._provider_info(resolved_provider) or {}
+        if info.get("protocol", "openai") == "anthropic":
             return await self._chat_anthropic(
                 messages, resolved_base, resolved_model, api_key, temperature, max_tokens
             )
@@ -139,6 +216,8 @@ class LLMGateway:
             temperature,
             max_tokens,
             response_format,
+            auth_method=info.get("auth_method", "bearer"),
+            api_key_header=info.get("api_key_header", ""),
         )
 
     async def chat_json(
@@ -237,6 +316,9 @@ class LLMGateway:
         temperature: float,
         max_tokens: int,
         response_format: dict[str, Any] | None,
+        *,
+        auth_method: str = "bearer",
+        api_key_header: str = "",
     ) -> str:
         payload: dict[str, Any] = {
             "model": model,
@@ -249,10 +331,11 @@ class LLMGateway:
         if response_format:
             payload["response_format"] = response_format
         url = f"{base_url.rstrip('/')}/chat/completions"
+        headers = self._auth_headers(api_key, auth_method, api_key_header)
         async with httpx.AsyncClient(timeout=120.0) as client:
             resp = await client.post(
                 url,
-                headers={"Authorization": f"Bearer {api_key}"},
+                headers=headers,
                 json=payload,
             )
             if resp.status_code >= 400:
@@ -260,6 +343,88 @@ class LLMGateway:
             resp.raise_for_status()
             data = resp.json()
             return data["choices"][0]["message"]["content"]
+
+    def _auth_headers(self, api_key: str, auth_method: str, header_name: str) -> dict[str, str]:
+        if auth_method == "custom_header":
+            name = (header_name or "Authorization").strip()
+            return {"Authorization": f"Bearer {api_key}", name: api_key}
+        return {"Authorization": f"Bearer {api_key}"}
+
+    async def probe(
+        self,
+        provider_id: str,
+        model_id: str | None = None,
+        *,
+        base_url: str | None = None,
+    ) -> dict[str, Any]:
+        """模型中心连通性探测：发一条最小 chat/completions（或 /v1/messages）。"""
+        import time
+
+        info = self._provider_info(provider_id) or {}
+        protocol = info.get("protocol", "openai")
+        api_key = self._api_key(provider_id)
+        if not api_key:
+            return {
+                "ok": False,
+                "provider_id": provider_id,
+                "error": "未配置 API Key",
+            }
+        model = model_id or self._default_model_for_provider(provider_id)
+        base = base_url or info.get("base_url", "")
+        started = time.perf_counter()
+        try:
+            if protocol == "anthropic":
+                raw = await self._chat_anthropic(
+                    [{"role": "user", "content": "ping"}],
+                    base,
+                    model,
+                    api_key,
+                    0.1,
+                    16,
+                )
+            else:
+                raw = await self._chat_openai_compat(
+                    [{"role": "user", "content": "ping"}],
+                    base,
+                    model,
+                    api_key,
+                    0.1,
+                    16,
+                    None,
+                    auth_method=info.get("auth_method", "bearer"),
+                    api_key_header=info.get("api_key_header", ""),
+                )
+            latency = (time.perf_counter() - started) * 1000
+            return {
+                "ok": bool(raw),
+                "provider_id": provider_id,
+                "model_id": model,
+                "latency_ms": round(latency, 1),
+                "error": "",
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "ok": False,
+                "provider_id": provider_id,
+                "model_id": model,
+                "error": str(exc)[:400],
+            }
+
+    async def chat_for_employee(
+        self,
+        employee_id: str,
+        messages: list[dict[str, str]],
+        *,
+        kind: TaskKind = TaskKind.CREATIVE,
+        as_json: bool = False,
+    ) -> str | dict[str, Any]:
+        """PRD 模块 1：chat_for_employee 作为 chat_for_role 的别名，employee_id 即岗位 id."""
+        return await self.chat_for_role(
+            employee_id,
+            messages,
+            kind=kind,
+            as_json=as_json,
+        )
 
     async def _chat_anthropic(
         self,

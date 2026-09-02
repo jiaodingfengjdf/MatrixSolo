@@ -42,9 +42,7 @@ class Settings(BaseSettings):
     )
     grsai_model: str = Field(default="gpt-5.4", alias="GRSAI_MODEL")
 
-    llm_default_provider: Literal["openai", "anthropic", "deepseek", "grsai"] = Field(
-        default="grsai", alias="LLM_DEFAULT_PROVIDER"
-    )
+    llm_default_provider: str = Field(default="grsai", alias="LLM_DEFAULT_PROVIDER")
 
     feishu_app_id: str = Field(default="", alias="FEISHU_APP_ID")
     feishu_app_secret: str = Field(default="", alias="FEISHU_APP_SECRET")
@@ -67,6 +65,7 @@ class Settings(BaseSettings):
     feishu_table_tasks: str = Field(default="", alias="FEISHU_TABLE_TASKS")
     feishu_table_assets: str = Field(default="", alias="FEISHU_TABLE_ASSETS")
     feishu_table_metrics: str = Field(default="", alias="FEISHU_TABLE_METRICS")
+    feishu_table_work_logs: str = Field(default="", alias="FEISHU_TABLE_WORK_LOGS")
 
     chroma_persist_dir: Path = Field(default=Path("./data/chroma"), alias="CHROMA_PERSIST_DIR")
     chroma_collection: str = Field(default="matrixsolo_rag", alias="CHROMA_COLLECTION")

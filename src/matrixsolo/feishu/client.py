@@ -310,6 +310,46 @@ class FeishuClient:
                     json={"fields": row},
                 )
 
+    async def write_work_log(self, log: Any) -> None:
+        """每日工作记录写飞书多维表（FEISHU_TABLE_WORK_LOGS）。未配置则静默跳过。"""
+        import os
+
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            return
+        s = self.settings
+        role = AgentRole.STRATEGY
+        if not (
+            self.configured(role)
+            and s.feishu_bitable_app_token
+            and s.feishu_table_work_logs
+        ):
+            return
+        token = await self.get_tenant_access_token(role)
+        if not token:
+            return
+        fields = {
+            "记录ID": log.log_id,
+            "日期": log.date,
+            "部门": log.department_name,
+            "员工": log.employee_title,
+            "项目": log.project,
+            "类型": log.work_type,
+            "状态": log.status,
+            "摘要": log.summary,
+            "产出链接": log.artifact_url,
+            "工作流ID": log.workflow_id,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                await client.post(
+                    f"https://open.feishu.cn/open-apis/bitable/v1/apps/{s.feishu_bitable_app_token}"
+                    f"/tables/{s.feishu_table_work_logs}/records",
+                    headers={"Authorization": f"Bearer {token}"},
+                    json={"fields": fields},
+                )
+        except Exception:
+            logger.exception("write_work_log feishu failed")
+
     async def verify_all_tokens(self) -> dict[str, Any]:
         """探测五岗 tenant_access_token 是否可用."""
         result: dict[str, Any] = {}

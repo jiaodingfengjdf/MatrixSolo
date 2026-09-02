@@ -471,6 +471,20 @@ class StudioHuddle:
         )
         job_name = str(result.get("job") or job)
         film = str(result.get("film_name") or "")
+        from matrixsolo.admin.work_logs import record_work_log
+
+        await record_work_log(
+            project=film or "矩阵日常 huddle",
+            work_type="huddle",
+            status="done",
+            summary=f"{job_name} huddle 完成：{result.get('angle') or ''} / {result.get('mood') or ''}",
+            workflow_id=done.workflow_id,
+            chat_id=chat_id,
+            stage="huddle",
+            employee_id="strategy",
+            employee_title="总编",
+            extra={"job": job_name, "film": film},
+        )
         if job_name in {"logo", "poster"} and film:
             from datetime import date
 

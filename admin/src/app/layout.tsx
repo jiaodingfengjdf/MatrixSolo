@@ -26,10 +26,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </div>
             <nav className="nav">
               <Link href="/">系统总览</Link>
+              <Link href="/agents">员工</Link>
+              <Link href="/models">模型中心</Link>
+              <Link href="/worklogs">工作记录</Link>
               <Link href="/workflows">工作流看板</Link>
-              <Link href="/agents">岗位 Agent</Link>
             </nav>
-            <div className="meta">身份 / Prompt / LLM / Skills / MCP</div>
+            <div className="meta">
+              员工入职 / Prompt OS / 模型中心 / 每日台账
+            </div>
           </aside>
           <main className="main">{children}</main>
         </div>

@@ -6,7 +6,9 @@ import {
   api,
   type AgentProfile,
   type McpServer,
+  type ModelProvider,
   type PromptSkill,
+  type PromptVersion,
 } from "@/lib/api";
 
 type Tab = "identity" | "prompt" | "llm" | "tools" | "skills" | "mcp";
@@ -19,6 +21,8 @@ export default function AgentDetailPage() {
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
   const [saving, setSaving] = useState(false);
+  const [versions, setVersions] = useState<PromptVersion[]>([]);
+  const [modelProviders, setModelProviders] = useState<ModelProvider[]>([]);
   const [skillForm, setSkillForm] = useState({ name: "", content: "" });
   const [skillUrl, setSkillUrl] = useState("");
   const [mcpForm, setMcpForm] = useState({
@@ -57,8 +61,35 @@ export default function AgentDetailPage() {
     markSynced(data);
   };
 
+  const loadVersions = async () => {
+    try {
+      const r = await api.listPromptVersions(role);
+      setVersions(r.items);
+    } catch {
+      setVersions([]);
+    }
+  };
+
+  const rollback = async (version: number) => {
+    try {
+      const updated = await api.rollbackPrompt(role, version);
+      setAgent(updated);
+      agentRef.current = updated;
+      markSynced(updated);
+      setToast(`已回滚人设到 v${version}`);
+      await loadVersions();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
   useEffect(() => {
     load().catch((e: Error) => setError(e.message));
+    loadVersions();
+    api
+      .listModelProviders()
+      .then((r) => setModelProviders(r.items))
+      .catch(() => setModelProviders([]));
   }, [role]);
 
   useEffect(() => {
@@ -104,6 +135,7 @@ export default function AgentDetailPage() {
       setAgent(updated);
       agentRef.current = updated;
       markSynced(updated);
+      void loadVersions();
       setToast("已同步到后端，立即生效");
       setTimeout(() => setToast(""), 2000);
     } catch (e) {
@@ -265,6 +297,45 @@ export default function AgentDetailPage() {
               从后端刷新
             </button>
           </div>
+
+          <div style={{ marginTop: 16 }}>
+            <h3>人设版本历史</h3>
+            <p className="meta" style={{ marginTop: 4 }}>
+              每次保存身份字段自动登记一版；润色与回滚也会追加版本。可回滚到任意历史版本。
+            </p>
+            {versions.length === 0 ? (
+              <p className="meta">暂无版本记录。</p>
+            ) : (
+              <div className="table-wrap">
+                <table className="data">
+                  <thead>
+                    <tr>
+                      <th>版本</th>
+                      <th>来源</th>
+                      <th>时间</th>
+                      <th>备注</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...versions].reverse().map((v) => (
+                      <tr key={v.version}>
+                        <td>v{v.version}</td>
+                        <td className="meta">{v.source}</td>
+                        <td className="meta">{v.created_at.slice(0, 19).replace("T", " ")}</td>
+                        <td className="meta">{v.note || "—"}</td>
+                        <td>
+                          <button className="secondary" onClick={() => void rollback(v.version)}>
+                            回滚
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -318,7 +389,7 @@ export default function AgentDetailPage() {
                 value={agent.llm.provider}
                 disabled={saving}
                 onChange={(e) => {
-                  const provider = e.target.value as AgentProfile["llm"]["provider"];
+                  const provider = e.target.value;
                   const presets: Record<string, { model: string; base_url: string }> = {
                     grsai: {
                       model: "gpt-5.4",
@@ -335,11 +406,12 @@ export default function AgentDetailPage() {
                     },
                   };
                   const preset = presets[provider];
+                  const custom = modelProviders.find((p) => p.id === provider && !p.builtin);
                   void applyLlm({
                     ...agent.llm,
                     provider,
                     model: preset?.model || agent.llm.model,
-                    base_url: preset?.base_url || agent.llm.base_url,
+                    base_url: preset?.base_url || custom?.base_url || agent.llm.base_url,
                   });
                 }}
               >
@@ -347,6 +419,13 @@ export default function AgentDetailPage() {
                 <option value="openai">openai</option>
                 <option value="anthropic">anthropic</option>
                 <option value="deepseek">deepseek</option>
+                {modelProviders
+                  .filter((p) => !p.builtin)
+                  .map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name || p.id}（自定义）
+                    </option>
+                  ))}
               </select>
             </label>
             <label>

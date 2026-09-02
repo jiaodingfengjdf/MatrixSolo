@@ -1,5 +1,5 @@
 export type LLMConfig = {
-  provider: "openai" | "anthropic" | "deepseek" | "grsai";
+  provider: string;
   model: string;
   base_url: string;
   temperature: number;
@@ -52,6 +52,67 @@ export type AgentProfile = {
   mcp_servers: McpServer[];
   enabled: boolean;
   updated_at: string;
+};
+
+export type ModelCapability = "text" | "vision" | "image" | "video" | "tts";
+
+export type ModelProvider = {
+  id: string;
+  name: string;
+  base_url: string;
+  auth_method: "bearer" | "anthropic" | "custom_header";
+  api_key_header: string;
+  protocol: "openai" | "anthropic";
+  timeout: number;
+  builtin: boolean;
+  enabled: boolean;
+  api_key_masked?: string;
+  has_key?: boolean;
+};
+
+export type ModelSlot = {
+  id: string;
+  provider_id: string;
+  model_id: string;
+  display_name: string;
+  capability: ModelCapability[];
+  context_note: string;
+  price_note: string;
+  enabled: boolean;
+  provider_name?: string;
+  provider_base_url?: string;
+};
+
+export type WorkLog = {
+  log_id: string;
+  date: string;
+  department_id: string;
+  department_name: string;
+  employee_id: string;
+  employee_title: string;
+  project: string;
+  work_type: "huddle" | "hitl" | "workflow" | "manual";
+  status: "started" | "blocked" | "done" | "failed";
+  summary: string;
+  artifact_url: string;
+  workflow_id: string;
+  chat_id: string;
+  stage: string;
+};
+
+export type StudioPrompt = {
+  studio_voice: string;
+  colleagues: string;
+  updated_at: string;
+};
+
+export type PromptVersion = {
+  employee_id: string;
+  version: number;
+  snapshot: Record<string, string>;
+  note: string;
+  source: string;
+  created_at: string;
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -138,6 +199,62 @@ export const api = {
   studioBoard: (limit = 40) =>
     request<StudioBoard>(`/api/admin/studio/board?limit=${limit}`),
   getWorkflow: (id: string) => request<Record<string, unknown>>(`/api/workflows/${id}`),
+  // 模型中心
+  listModelProviders: () =>
+    request<{ default_provider_id: string; items: ModelProvider[] }>(
+      "/api/admin/model-providers",
+    ),
+  createModelProvider: (body: Partial<ModelProvider> & { api_key?: string }) =>
+    request<ModelProvider>("/api/admin/model-providers", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  updateModelProvider: (id: string, body: Partial<ModelProvider>) =>
+    request<ModelProvider>(`/api/admin/model-providers/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  deleteModelProvider: (id: string) =>
+    request<{ ok: boolean }>(`/api/admin/model-providers/${id}`, { method: "DELETE" }),
+  probeModelProvider: (id: string, body: { model_id?: string; base_url?: string } = {}) =>
+    request<{ ok: boolean; latency_ms?: number; model_id?: string; error?: string }>(
+      `/api/admin/model-providers/${id}/probe`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+  listModelSlots: () => request<{ items: ModelSlot[] }>("/api/admin/model-slots"),
+  createModelSlot: (body: Partial<ModelSlot>) =>
+    request<ModelSlot>("/api/admin/model-slots", { method: "POST", body: JSON.stringify(body) }),
+  updateModelSlot: (id: string, body: Partial<ModelSlot>) =>
+    request<ModelSlot>(`/api/admin/model-slots/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  deleteModelSlot: (id: string) =>
+    request<{ ok: boolean }>(`/api/admin/model-slots/${id}`, { method: "DELETE" }),
+  // Prompt OS
+  getPromptStudio: () => request<StudioPrompt>("/api/admin/prompt/studio"),
+  updatePromptStudio: (body: { studio_voice: string; colleagues: string }) =>
+    request<StudioPrompt>("/api/admin/prompt/studio", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  listPromptVersions: (role: string) =>
+    request<{ items: PromptVersion[] }>(`/api/admin/agents/${role}/prompt/versions`),
+  rollbackPrompt: (role: string, version: number) =>
+    request<AgentProfile>(`/api/admin/agents/${role}/prompt/rollback`, {
+      method: "POST",
+      body: JSON.stringify({ version }),
+    }),
+  // 每日工作记录
+  listWorkLogs: (params: Record<string, string | number> = {}) => {
+    const qs = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== "") qs.set(k, String(v));
+    });
+    return request<{ items: WorkLog[] }>(`/api/admin/work-logs?${qs.toString()}`);
+  },
+  createWorkLog: (body: Partial<WorkLog>) =>
+    request<WorkLog>("/api/admin/work-logs", { method: "POST", body: JSON.stringify(body) }),
 };
 
 export type StudioBoard = {
