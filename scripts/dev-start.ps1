@@ -2,7 +2,9 @@
     [switch]$SkipBackend,
     [switch]$SkipAdmin,
     [switch]$SkipMcp,
-    [switch]$NoReload
+    [switch]$NoReload,
+    [switch]$Tail,
+    [switch]$Install
 )
 
 $ErrorActionPreference = "Stop"
@@ -55,6 +57,7 @@ function Start-Tracked(
         pid = $proc.Id
         port = $Port
         log = $out
+        err = $err
     }
 }
 
@@ -63,6 +66,22 @@ Write-Host "   项目: $Root"
 Write-Host "   python: $Python"
 Write-Host "   node: $Node"
 Write-Host ""
+
+# -Install：启动前补齐 admin 依赖（next dev 必需）
+if ($Install) {
+    Write-Host "[0/3] 安装 admin 依赖 (npm install)..."
+    Push-Location $Admin
+    try {
+        & npm.cmd install --no-audit --no-fund
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "  [警告] npm install 退出码 $LASTEXITCODE，管理台可能不可用。"
+        } else {
+            Write-Host "  [完成] admin 依赖就绪。"
+        }
+    } finally {
+        Pop-Location
+    }
+}
 
 $entries = @()
 
@@ -78,6 +97,10 @@ if (-not $SkipBackend) {
 
 if (-not $SkipAdmin) {
     Write-Host "[2/3] 管理台 Next.js (next dev -> :3434)"
+    $nextBin = Join-Path $Admin "node_modules\next\dist\bin\next"
+    if (-not (Test-Path -LiteralPath $nextBin)) {
+        Write-Host "  [警告] 未找到 $nextBin，请先运行: cd admin; npm install  或加 -Install 参数"
+    }
     $adminArgs = @("node_modules/next/dist/bin/next", "dev", "-p", "3434")
     $item = Start-Tracked "admin" $Node $adminArgs $Admin 3434
     if ($item) { $entries += $item }
@@ -106,3 +129,16 @@ Write-Host "   API    http://127.0.0.1:9797/health"
 Write-Host "   MCP    http://127.0.0.1:8765/tools"
 Write-Host ""
 Write-Host "一键停止: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dev-stop.ps1"
+
+if ($Tail -and $entries.Count -gt 0) {
+    Write-Host ""
+    Write-Host "以下开始实时显示日志（按 Ctrl+C 停止查看，服务仍在后台运行）："
+    Write-Host "  停止服务请运行 scripts\dev-stop.ps1"
+    Write-Host "------------------------------------------------------------"
+    $logFiles = @()
+    foreach ($item in $entries) {
+        if ($item.log) { $logFiles += $item.log }
+        if ($item.err) { $logFiles += $item.err }
+    }
+    Get-Content -Path $logFiles -Wait -Tail 20
+}
