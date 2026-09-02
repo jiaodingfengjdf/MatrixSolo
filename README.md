@@ -66,7 +66,7 @@ pytest -q
 - 工具能力开关 + 提示词 Skills 增删
 - 每岗 LLM provider/model/temperature（Provider 可选模型中心注册的自定义源）
 - 每岗 MCP Server CRUD（http/sse/stdio）与工具探测
-- 模型中心：自定义 Provider、连通性探测、按能力槽位（text/vision/image/video/tts）配置
+- 模型中心：自定义 Provider（OpenAI 兼容 / Anthropic / Responses）、连通性探测、按能力槽位（text/vision/image/video/tts）配置
 - Prompt OS：L0 工作室守则可编辑、L2 分栏预览、人设版本历史与回滚
 - 每日工作记录：huddle / HITL / 生产 DAG 自动落本地 `data/admin/work_logs.jsonl`，可同步飞书 `FEISHU_TABLE_WORK_LOGS`
 - 配置落盘：`data/admin/agent_profiles.json`

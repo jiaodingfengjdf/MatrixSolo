@@ -24,6 +24,8 @@ def _reset_singletons() -> None:
 @pytest.fixture()
 def data_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("MATRIXSOLO_DATA_DIR", str(tmp_path / "data"))
+    for key in ("GRSAI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY"):
+        monkeypatch.setenv(key, "")
     from matrixsolo.config import get_settings
 
     get_settings.cache_clear()

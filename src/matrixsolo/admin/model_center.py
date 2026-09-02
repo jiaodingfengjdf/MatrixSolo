@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
-from matrixsolo.config import get_settings
+from matrixsolo.config import Settings, get_settings
 
 
 def _utcnow() -> datetime:
@@ -49,7 +49,7 @@ class ModelProvider(BaseModel):
     auth_method: AuthMethod = AuthMethod.BEARER
     api_key: str = ""  # 仅服务端存储，GET 返回脱敏
     api_key_header: str = ""  # auth_method == custom_header 时使用
-    protocol: Literal["openai", "anthropic"] = "openai"  # 请求协议
+    protocol: Literal["openai", "anthropic", "responses"] = "openai"  # 请求协议
     timeout: float = 120.0
     builtin: bool = False
     enabled: bool = True
@@ -89,8 +89,9 @@ class ModelProviderCreate(BaseModel):
     auth_method: AuthMethod = AuthMethod.BEARER
     api_key: str = ""
     api_key_header: str = ""
-    protocol: Literal["openai", "anthropic"] = "openai"
+    protocol: Literal["openai", "anthropic", "responses"] = "openai"
     timeout: float = 120.0
+    default_model: str = ""  # 可选：添加 Provider 时顺便创建默认 text 槽位
 
 
 class ModelProviderUpdate(BaseModel):
@@ -99,7 +100,7 @@ class ModelProviderUpdate(BaseModel):
     auth_method: AuthMethod | None = None
     api_key: str | None = None
     api_key_header: str | None = None
-    protocol: Literal["openai", "anthropic"] | None = None
+    protocol: Literal["openai", "anthropic", "responses"] | None = None
     timeout: float | None = None
     enabled: bool | None = None
 
@@ -132,8 +133,9 @@ class ProbeResult(BaseModel):
 
 
 # 内置供应商（与 LLM_PROVIDER_CATALOG 对齐，读 settings 补齐密钥）
-def builtin_providers() -> list[ModelProvider]:
-    s = get_settings()
+def builtin_providers(settings: Settings | None = None) -> list[ModelProvider]:
+    # 每次全新解析 .env，避免长驻进程缓存旧值（改 .env 无需重启）
+    s = settings if settings is not None else Settings()
     return [
         ModelProvider(
             id="grsai",
@@ -217,18 +219,33 @@ class ModelStore:
         raw = json.loads(self.path.read_text(encoding="utf-8"))
         providers = [ModelProvider.model_validate(p) for p in raw.get("providers", [])]
         slots = [ModelSlot.model_validate(s) for s in raw.get("slots", [])]
-        # 内置供应商始终同步 settings 的 base_url / api_key（仅当内置 key 为空）
+        # 内置供应商始终以 .env 为准：base_url / api_key / 鉴权 / 协议
         builtins = {p.id: p for p in builtin_providers()}
+        changed = False
         for provider in providers:
             if not provider.builtin:
                 continue
             seed = builtins.get(provider.id)
             if not seed:
                 continue
-            if seed.base_url:
+            if seed.base_url and provider.base_url != seed.base_url:
                 provider.base_url = seed.base_url
-            if seed.api_key and not provider.api_key:
+                changed = True
+            if provider.api_key != seed.api_key:
                 provider.api_key = seed.api_key
+                changed = True
+            if provider.auth_method != seed.auth_method:
+                provider.auth_method = seed.auth_method
+                changed = True
+            if provider.protocol != seed.protocol:
+                provider.protocol = seed.protocol
+                changed = True
+        if changed:
+            # 把 .env 最新值回写注册表，避免磁盘残留旧空密钥
+            try:
+                self._write(providers, slots)
+            except OSError:
+                pass
         return providers, slots
 
     def _write(
@@ -261,17 +278,28 @@ class ModelStore:
             return next((p for p in providers if p.id == provider_id), None)
 
     def default_provider_id(self) -> str:
-        s = get_settings()
-        return s.llm_default_provider or "grsai"
+        return Settings().llm_default_provider or "grsai"
 
     def create_provider(self, body: ModelProviderCreate) -> ModelProvider:
         with self._lock:
             providers, slots = self._read()
             if any(p.id == body.id for p in providers):
                 raise ValueError(f"provider id 已存在: {body.id}")
-            provider = ModelProvider(**body.model_dump())
+            data = body.model_dump(exclude={"default_model"})
+            provider = ModelProvider(**data)
             provider.builtin = False
             providers.append(provider)
+            default_model = (body.default_model or "").strip()
+            if default_model:
+                slots.append(
+                    ModelSlot(
+                        provider_id=provider.id,
+                        model_id=default_model,
+                        display_name=default_model,
+                        capability=[ModelCapability.TEXT],
+                        enabled=True,
+                    )
+                )
             self._write(providers, slots)
             return provider
 

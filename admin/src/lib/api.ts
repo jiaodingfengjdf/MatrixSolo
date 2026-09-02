@@ -62,7 +62,7 @@ export type ModelProvider = {
   base_url: string;
   auth_method: "bearer" | "anthropic" | "custom_header";
   api_key_header: string;
-  protocol: "openai" | "anthropic";
+  protocol: "openai" | "anthropic" | "responses";
   timeout: number;
   builtin: boolean;
   enabled: boolean;
@@ -275,12 +275,14 @@ export const api = {
     request<{ default_provider_id: string; items: ModelProvider[] }>(
       "/api/admin/model-providers",
     ),
-  createModelProvider: (body: Partial<ModelProvider> & { api_key?: string }) =>
+  createModelProvider: (
+    body: Partial<ModelProvider> & { api_key?: string; default_model?: string },
+  ) =>
     request<ModelProvider>("/api/admin/model-providers", {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  updateModelProvider: (id: string, body: Partial<ModelProvider>) =>
+  updateModelProvider: (id: string, body: Partial<ModelProvider> & { api_key?: string }) =>
     request<ModelProvider>(`/api/admin/model-providers/${id}`, {
       method: "PUT",
       body: JSON.stringify(body),

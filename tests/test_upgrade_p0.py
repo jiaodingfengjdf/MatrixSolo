@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from typing import ClassVar, Self
 
 import pytest
 
@@ -20,6 +21,8 @@ def _reset_p0_singletons() -> None:
 @pytest.fixture()
 def data_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("MATRIXSOLO_DATA_DIR", str(tmp_path / "data"))
+    for key in ("GRSAI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY"):
+        monkeypatch.setenv(key, "")
     from matrixsolo.config import get_settings
 
     get_settings.cache_clear()
@@ -104,6 +107,174 @@ def test_gateway_capability_and_alias(data_dir):
     result = asyncio.run(gateway.probe("grsai"))
     assert result["ok"] is False
     assert "Key" in result["error"]
+
+
+def test_builtin_provider_key_refreshed_from_env(data_dir, monkeypatch):
+    import json
+
+    from matrixsolo.admin.model_center import get_model_store
+
+    monkeypatch.setenv("GRSAI_API_KEY", "sk-test-1234567890")
+    # 先让注册表带 key，再模拟“旧文件密钥为空”
+    store = get_model_store()
+    ref = store.get_provider("grsai")
+    assert ref.api_key == "sk-test-1234567890"
+
+    raw = json.loads(store.path.read_text(encoding="utf-8"))
+    for provider in raw["providers"]:
+        if provider["id"] == "grsai":
+            provider["api_key"] = ""
+    store.path.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
+
+    refreshed = store.get_provider("grsai")
+    assert refreshed.api_key == "sk-test-1234567890"
+    # 回写磁盘，避免下一次仍显示旧空密钥
+    on_disk = json.loads(store.path.read_text(encoding="utf-8"))
+    grsai = next(p for p in on_disk["providers"] if p["id"] == "grsai")
+    assert grsai["api_key"] == "sk-test-1234567890"
+
+
+def test_provider_default_model_creates_slot(data_dir):
+    from matrixsolo.admin.model_center import ModelProviderCreate, get_model_store
+
+    store = get_model_store()
+    store.create_provider(
+        ModelProviderCreate(
+            id="relay2",
+            name="R2",
+            base_url="https://r2.example.com/v1",
+            api_key="sk-1234567890",
+            default_model="r2-model",
+        )
+    )
+    slot = store.resolve_slot("relay2")
+    assert slot and slot.model_id == "r2-model"
+    assert any(s.model_id == "r2-model" for s in store.list_slots())
+
+
+def test_probe_without_model_gives_clear_error(data_dir):
+    from matrixsolo.admin.model_center import ModelProviderCreate, get_model_store
+    from matrixsolo.gateway import get_gateway
+
+    get_model_store().create_provider(
+        ModelProviderCreate(
+            id="relay3",
+            name="R3",
+            base_url="https://r3.example.com/v1",
+            api_key="sk-1234567890",
+        )
+    )
+    result = asyncio.run(get_gateway().probe("relay3"))
+    assert result["ok"] is False
+    assert "model" in result["error"]
+    assert "能力槽位" in result["error"]
+
+
+def test_responses_protocol_chat_and_endpoint(data_dir, monkeypatch):
+    from matrixsolo.admin.model_center import ModelProviderCreate, get_model_store
+    from matrixsolo.gateway.llm import LLMGateway
+
+    get_model_store().create_provider(
+        ModelProviderCreate(
+            id="deepseek-responses",
+            name="DeepSeek Responses",
+            base_url="https://api.deepseek.com",
+            api_key="sk-test-1234567890",
+            protocol="responses",
+            default_model="deepseek-v4-flash",
+        )
+    )
+
+    captured: list[dict[str, object]] = []
+
+    class FakeResponse:
+        status_code = 200
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {
+                "status": "completed",
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {"type": "output_text", "text": '{"ok": true}'},
+                        ],
+                    }
+                ],
+            }
+
+    class FakeClient:
+        instances: ClassVar[list[FakeClient]] = []
+
+        def __init__(self, **kwargs: object) -> None:
+            self.kwargs = kwargs
+            self.instances.append(self)
+
+        async def __aenter__(self) -> Self:
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+        async def post(self, url: str, **kwargs: object) -> FakeResponse:
+            captured.append({"url": url, **kwargs})
+            return FakeResponse()
+
+    monkeypatch.setattr("matrixsolo.gateway.llm.httpx.AsyncClient", FakeClient)
+
+    raw = asyncio.run(
+        LLMGateway().chat(
+            [
+                {"role": "system", "content": "只输出 JSON"},
+                {"role": "user", "content": "hello"},
+            ],
+            provider="deepseek-responses",
+            temperature=0.2,
+            max_tokens=64,
+            response_format={"type": "json_object"},
+        )
+    )
+    assert raw == '{"ok": true}'
+    assert captured
+    call = captured[0]
+    assert call["url"] == "https://api.deepseek.com/responses"
+    payload = call["json"]
+    assert isinstance(payload, dict)
+    assert payload["model"] == "deepseek-v4-flash"
+    assert payload["instructions"] == "只输出 JSON"
+    assert payload["input"] == [{"role": "user", "content": "hello"}]
+    assert payload["text"] == {"format": {"type": "json_object"}}
+    assert LLMGateway()._responses_endpoint("https://api.deepseek.com/v1") == (
+        "https://api.deepseek.com/responses"
+    )
+    assert LLMGateway()._responses_endpoint("https://api.openai.com/v1") == (
+        "https://api.openai.com/v1/responses"
+    )
+
+
+def test_responses_vision_input_shape(data_dir):
+    from matrixsolo.gateway.llm import LLMGateway
+
+    instructions, items = LLMGateway()._responses_input(
+        [
+            {"role": "system", "content": "看图"},
+            {"role": "user", "content": "这张图里有什么？"},
+        ],
+        ["https://example.com/a.jpg"],
+    )
+    assert instructions == "看图"
+    assert items == [
+        {
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": "这张图里有什么？"},
+                {"type": "input_image", "image_url": "https://example.com/a.jpg"},
+            ],
+        }
+    ]
 
 
 def test_prompt_os_layered_contains_layers(data_dir):

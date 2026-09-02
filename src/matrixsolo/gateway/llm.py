@@ -222,14 +222,27 @@ class LLMGateway:
         provider = get_model_store().get_provider(slot.provider_id)
         if not provider or not provider.api_key:
             raise CapabilityUnavailable(f"vision provider 未配置密钥: {slot.provider_id}")
-        if provider.protocol != "openai":
-            raise CapabilityUnavailable("视觉理解暂仅支持 OpenAI 兼容协议")
+        if provider.protocol not in {"openai", "responses"}:
+            raise CapabilityUnavailable("视觉理解暂仅支持 OpenAI 兼容 / Responses 协议")
 
         content: list[dict[str, Any]] = [
             {"type": "text", "text": (m.get("content") or "")} for m in messages
         ]
         for image in (images or [])[:8]:
             content.append({"type": "image_url", "image_url": {"url": image}})
+        if provider.protocol == "responses":
+            return await self._chat_responses(
+                messages,
+                provider.base_url,
+                slot.model_id,
+                provider.api_key,
+                float(kwargs.get("temperature") or 0.3),
+                int(kwargs.get("max_tokens") or 2048),
+                None,
+                images=(images or [])[:8],
+                auth_method=provider.auth_method.value,
+                api_key_header=provider.api_key_header or "",
+            )
         payload_messages = [
             {"role": "user", "content": content},
         ]
@@ -336,6 +349,18 @@ class LLMGateway:
             return await self._chat_anthropic(
                 messages, resolved_base, resolved_model, api_key, temperature, max_tokens
             )
+        if info.get("protocol", "openai") == "responses":
+            return await self._chat_responses(
+                messages,
+                resolved_base,
+                resolved_model,
+                api_key,
+                temperature,
+                max_tokens,
+                response_format,
+                auth_method=info.get("auth_method", "bearer"),
+                api_key_header=info.get("api_key_header", ""),
+            )
         # openai / deepseek / grsai 均走 OpenAI 兼容协议
         return await self._chat_openai_compat(
             messages,
@@ -376,8 +401,7 @@ class LLMGateway:
         raw = strip_think(raw)
         if raw.startswith("```"):
             raw = raw.strip("`")
-            if raw.startswith("json"):
-                raw = raw[4:]
+            raw = raw.removeprefix("json")
         try:
             return json.loads(raw)
         except json.JSONDecodeError:
@@ -473,6 +497,106 @@ class LLMGateway:
             data = resp.json()
             return data["choices"][0]["message"]["content"]
 
+    @staticmethod
+    def _responses_endpoint(base_url: str) -> str:
+        """DeepSeek Responses API 根路径是 /responses，兼容用户误填 /v1 的情况."""
+        base = (base_url or "").strip().rstrip("/")
+        if base.endswith("/v1") and "api.deepseek.com" in base:
+            base = base[: -3].rstrip("/")
+        if base.endswith("/responses"):
+            return base
+        return f"{base}/responses"
+
+    def _responses_input(
+        self,
+        messages: list[dict[str, str]],
+        images: list[str] | None = None,
+    ) -> tuple[str, list[dict[str, Any]]]:
+        """把业务消息转换为 Responses API input，并将 system 提升为 instructions."""
+        system_parts: list[str] = []
+        items: list[dict[str, Any]] = []
+        image_urls = (images or [])[:8]
+        for msg in messages:
+            role = (msg.get("role") or "user").strip()
+            text = msg.get("content") or ""
+            if role == "system":
+                system_parts.append(text)
+                continue
+            if role not in {"user", "assistant", "developer"}:
+                role = "user"
+            content: Any = text
+            if image_urls and role == "user":
+                content = [{"type": "input_text", "text": text}]
+                content.extend(
+                    {"type": "input_image", "image_url": url} for url in image_urls
+                )
+                image_urls = []
+            items.append({"role": role, "content": content})
+        if not items:
+            items.append(
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": "hello"},
+                    ],
+                }
+            )
+        return "\n\n".join(p for p in system_parts if p), items
+
+    async def _chat_responses(
+        self,
+        messages: list[dict[str, str]],
+        base_url: str,
+        model: str,
+        api_key: str,
+        temperature: float,
+        max_tokens: int,
+        response_format: dict[str, Any] | None,
+        *,
+        images: list[str] | None = None,
+        auth_method: str = "bearer",
+        api_key_header: str = "",
+    ) -> str:
+        """OpenAI Responses API 格式（DeepSeek 新版 /responses 同构）."""
+        instructions, input_items = self._responses_input(messages, images)
+        payload: dict[str, Any] = {
+            "model": model,
+            "input": input_items,
+            "temperature": temperature,
+            "max_output_tokens": max_tokens,
+            "stream": False,
+        }
+        if instructions:
+            payload["instructions"] = instructions
+        if response_format:
+            payload["text"] = {
+                "format": {"type": response_format.get("type", "text")}
+            }
+        url = self._responses_endpoint(base_url)
+        headers = self._auth_headers(api_key, auth_method, api_key_header)
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(url, headers=headers, json=payload)
+            if resp.status_code >= 400:
+                logger.error("LLM error %s %s: %s", resp.status_code, url, resp.text[:500])
+            resp.raise_for_status()
+            data = resp.json()
+            raw = data.get("output_text")
+            if not isinstance(raw, str):
+                raw = ""
+                for item in data.get("output") or []:
+                    content = item.get("content")
+                    if isinstance(content, list):
+                        raw += "".join(
+                            part.get("text", "")
+                            for part in content
+                            if isinstance(part, dict) and part.get("type") == "output_text"
+                        )
+                    elif isinstance(content, str):
+                        raw += content
+            if not raw:
+                raise RuntimeError("Responses API 返回内容为空或缺少 output_text")
+            return raw
+
     def _auth_headers(self, api_key: str, auth_method: str, header_name: str) -> dict[str, str]:
         if auth_method == "custom_header":
             name = (header_name or "Authorization").strip()
@@ -499,6 +623,15 @@ class LLMGateway:
                 "error": "未配置 API Key",
             }
         model = model_id or self._default_model_for_provider(provider_id)
+        if not model:
+            return {
+                "ok": False,
+                "provider_id": provider_id,
+                "error": (
+                    f"未找到 {provider_id} 的 model 槽位。请先在模型中心为它添加"
+                    "「能力槽位」(model_id)，或在新建 Provider 时填写默认模型。"
+                ),
+            }
         base = base_url or info.get("base_url", "")
         started = time.perf_counter()
         try:
@@ -510,6 +643,18 @@ class LLMGateway:
                     api_key,
                     0.1,
                     16,
+                )
+            elif protocol == "responses":
+                raw = await self._chat_responses(
+                    [{"role": "user", "content": "ping"}],
+                    base,
+                    model,
+                    api_key,
+                    0.1,
+                    512,
+                    None,
+                    auth_method=info.get("auth_method", "bearer"),
+                    api_key_header=info.get("api_key_header", ""),
                 )
             else:
                 raw = await self._chat_openai_compat(

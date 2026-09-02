@@ -2,7 +2,7 @@
 chcp 65001 >nul
 setlocal enabledelayedexpansion
 
-rem 项目根 = scripts 上级目录
+rem project root = parent of scripts
 for %%I in ("%~dp0..") do set "ROOT=%%~fI"
 cd /d "%ROOT%"
 if not exist "data\logs" mkdir "data\logs"
@@ -31,12 +31,14 @@ if "%DO_INSTALL%"=="1" (
   popd
 )
 
+rem compute reload arg before the block to avoid parse-time expansion
+set "RELOAD_ARG=--reload"
+if "%NORELOAD%"=="1" set "RELOAD_ARG="
+
 if "%START_BACKEND%"=="1" (
   netstat -ano | findstr ":9797 " | findstr /i "LISTENING" >nul 2>nul
   if errorlevel 1 (
     echo [1/3] 启动 后端 FastAPI 9797
-    set "RELOAD_ARG="
-    if "%NORELOAD%"=="0" set "RELOAD_ARG=--reload"
     start "MatrixSolo-Backend" /min cmd /c "python -m uvicorn matrixsolo.main:app --host 127.0.0.1 --port 9797 %RELOAD_ARG% >> data\logs\dev_backend.out.log 2>> data\logs\dev_backend.err.log"
   ) else (
     echo [1/3] 跳过 后端已在运行 9797
