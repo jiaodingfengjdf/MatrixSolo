@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "matrixsolo"
+version = "0.1.0"
+description = "一人影视自媒体多 Agent 协作中台"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.32.0",
+  "pydantic>=2.9.0",
+  "pydantic-settings>=2.6.0",
+  "httpx>=0.27.0",
+  "langgraph>=0.2.0",
+  "langchain-core>=0.3.0",
+  "langchain-openai>=0.2.0",
+  "chromadb>=0.5.0",
+  "apscheduler>=3.10.0",
+  "python-dotenv>=1.0.0",
+  "tenacity>=9.0.0",
+  "aiofiles>=24.1.0",
+  "orjson>=3.10.0",
+  "edge-tts>=6.1.0",
+  "pillow>=10.4.0",
+  "mcp>=1.0.0",
+  "lark-oapi>=1.3.0",
+  "rich>=13.9.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0.0",
+  "pytest-asyncio>=0.24.0",
+  "ruff>=0.7.0",
+]
+local-av = [
+  "openai-whisper>=20231117",
+  "ffmpeg-python>=0.2.0",
+]
+
+[project.scripts]
+matrixsolo = "matrixsolo.main:run"
+matrixsolo-mcp = "matrixsolo.mcp_server.server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

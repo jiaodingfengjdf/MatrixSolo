@@ -1,0 +1,22 @@
+services:
+  matrixsolo:
+    build: .
+    ports:
+      - "9797:9797"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./Assets:/app/Assets
+    command: ["uvicorn", "matrixsolo.main:app", "--host", "0.0.0.0", "--port", "9797"]
+
+  mcp:
+    build: .
+    ports:
+      - "8765:8765"
+    env_file:
+      - .env
+    volumes:
+      - ./Assets:/app/Assets
+      - ./data:/app/data
+    command: ["uvicorn", "matrixsolo.mcp_server.server:app", "--host", "0.0.0.0", "--port", "8765"]
