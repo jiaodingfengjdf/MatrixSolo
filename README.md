@@ -35,6 +35,23 @@ npm run dev
 # http://127.0.0.1:3434
 ```
 
+## 开发者模式一键启停（测试专用）
+
+Windows PowerShell 一键启动后端（`uvicorn --reload`）+ 管理台（`next dev`）+ 本地 MCP：
+
+```powershell
+# 一键启动
+.\scripts\dev-start.ps1
+# 或双击 scripts\dev-start.cmd
+
+# 一键停止（会整棵进程树停止，含 --reload 子进程）
+.\scripts\dev-stop.ps1
+```
+
+脚本特性：自动复用项目 `.venv`（无则用全局 `python`）、端口占用时跳过避免重复启动、
+日志落 `data/logs/dev_*.log`、进程记录在 `data/admin/dev_processes.json`。
+可选参数：`-SkipBackend` / `-SkipAdmin` / `-SkipMcp` / `-NoReload`（关闭热重载便于调试）。
+
 无 LLM Key 也可跑 mock：
 
 ```powershell
