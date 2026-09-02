@@ -44,7 +44,7 @@ export default function AgentsPage() {
               {a.title} <span className="meta">/{a.role}</span>
             </h3>
             <p className="meta">
-              {a.llm.provider} · {a.llm.model}
+              {a.llm.provider} · 模型中心
             </p>
             <p className="meta">
               {(a.identity || "").split("\n")[0] || a.role}

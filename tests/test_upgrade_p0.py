@@ -277,6 +277,71 @@ def test_responses_vision_input_shape(data_dir):
     ]
 
 
+def test_chat_for_role_uses_model_center_slot(data_dir, monkeypatch):
+    import matrixsolo.admin.store as store_module
+    from matrixsolo.admin.model_center import ModelProviderCreate, get_model_store
+    from matrixsolo.admin.models import AgentProfilePatch, LLMConfig
+    from matrixsolo.admin.store import ProfileStore, get_profile_store
+    from matrixsolo.gateway.llm import LLMGateway
+
+    store_module._store = ProfileStore(path=data_dir / "admin" / "agent_profiles.json")
+    get_model_store().create_provider(
+        ModelProviderCreate(
+            id="relay-slot",
+            name="Relay Slot",
+            base_url="https://relay.example.com/v1",
+            api_key="sk-test-1234567890",
+            protocol="openai",
+            default_model="from-model-center",
+        )
+    )
+    get_profile_store().update(
+        "strategy",
+        AgentProfilePatch(llm=LLMConfig(provider="relay-slot", temperature=0.2)),
+    )
+
+    captured: list[dict[str, object]] = []
+
+    class FakeResponse:
+        status_code = 200
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {
+                "choices": [
+                    {"message": {"content": "ok"}},
+                ]
+            }
+
+    class FakeClient:
+        def __init__(self, **kwargs: object) -> None:
+            self.kwargs = kwargs
+
+        async def __aenter__(self) -> Self:
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+        async def post(self, url: str, **kwargs: object) -> FakeResponse:
+            captured.append({"url": url, **kwargs})
+            return FakeResponse()
+
+    monkeypatch.setattr("matrixsolo.gateway.llm.httpx.AsyncClient", FakeClient)
+    raw = asyncio.run(
+        LLMGateway().chat_for_role(
+            "strategy",
+            [{"role": "user", "content": "hello"}],
+        )
+    )
+    assert raw == "ok"
+    payload = captured[0]["json"]
+    assert isinstance(payload, dict)
+    assert payload["model"] == "from-model-center"
+
+
 def test_prompt_os_layered_contains_layers(data_dir):
     from matrixsolo.admin.models import AgentProfile, AgentRoleKey
     from matrixsolo.admin.prompt_os import compose_layered, estimate_tokens

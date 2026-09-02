@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, Literal
 from uuid import uuid4
@@ -19,7 +19,7 @@ class AgentRoleKey(str, Enum):
 class LLMConfig(BaseModel):
     # 支持模型中心动态注册的任意 provider id（不绑定枚举）
     provider: str = "grsai"
-    model: str = "gpt-5.4"
+    # model 由模型中心能力槽位统一解析，岗位配置不再保存 model
     base_url: str = ""
     temperature: float = 0.7
     max_tokens: int = 4096
@@ -109,7 +109,7 @@ class AgentProfile(BaseModel):
     skills: list[PromptSkill] = Field(default_factory=list)
     mcp_servers: list[McpServerConfig] = Field(default_factory=list)
     enabled: bool = True
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     def composed_system_prompt(self) -> str:
         from matrixsolo.admin.prompt_os import compose_layered

@@ -1,6 +1,5 @@
 export type LLMConfig = {
   provider: string;
-  model: string;
   base_url: string;
   temperature: number;
   max_tokens: number;

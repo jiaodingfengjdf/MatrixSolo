@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from matrixsolo.admin.models import AgentProfile, AgentRoleKey, LLMConfig, McpServerConfig, PromptSkill, ToolCapability
+from matrixsolo.admin.models import (
+    AgentProfile,
+    AgentRoleKey,
+    LLMConfig,
+    McpServerConfig,
+    PromptSkill,
+    ToolCapability,
+)
 from matrixsolo.admin.personas import PERSONAS
 
 
@@ -44,7 +51,6 @@ def default_profiles() -> dict[str, AgentProfile]:
             title="总编",
             llm=LLMConfig(
                 provider="grsai",
-                model="gpt-5.4",
                 base_url="https://grsai.dakka.com.cn/v1",
                 temperature=0.75,
             ),
@@ -61,7 +67,6 @@ def default_profiles() -> dict[str, AgentProfile]:
             title="文案",
             llm=LLMConfig(
                 provider="grsai",
-                model="gpt-5.4",
                 base_url="https://grsai.dakka.com.cn/v1",
                 temperature=0.85,
             ),
@@ -78,7 +83,6 @@ def default_profiles() -> dict[str, AgentProfile]:
             title="视觉",
             llm=LLMConfig(
                 provider="grsai",
-                model="gpt-5.4",
                 base_url="https://grsai.dakka.com.cn/v1",
                 temperature=0.85,
             ),
@@ -95,7 +99,6 @@ def default_profiles() -> dict[str, AgentProfile]:
             title="剪辑",
             llm=LLMConfig(
                 provider="grsai",
-                model="gpt-5.4",
                 base_url="https://grsai.dakka.com.cn/v1",
                 temperature=0.55,
             ),
@@ -121,7 +124,6 @@ def default_profiles() -> dict[str, AgentProfile]:
             title="运营",
             llm=LLMConfig(
                 provider="grsai",
-                model="gpt-5.4",
                 base_url="https://grsai.dakka.com.cn/v1",
                 temperature=0.65,
             ),

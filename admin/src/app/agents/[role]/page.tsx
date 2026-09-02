@@ -167,7 +167,7 @@ export default function AgentDetailPage() {
     try {
       const updated = await api.updateAgent(role, { llm: nextLlm });
       setAgent(updated);
-      setToast(`模型已生效：${nextLlm.provider}/${nextLlm.model}`);
+      setToast(`模型配置已生效：${nextLlm.provider}`);
       setTimeout(() => setToast(""), 2500);
     } catch (e) {
       setError((e as Error).message);
@@ -381,7 +381,7 @@ export default function AgentDetailPage() {
       {tab === "llm" && (
         <div className="panel">
           <h2>LLM 接入</h2>
-          <p className="meta">修改后自动保存，下一轮 Agent 调用立即使用新模型</p>
+          <p className="meta">模型由模型中心按 Provider 自动解析；这里只设置温度与输出上限</p>
           <div className="form-row">
             <label>
               Provider
@@ -390,18 +390,15 @@ export default function AgentDetailPage() {
                 disabled={saving}
                 onChange={(e) => {
                   const provider = e.target.value;
-                  const presets: Record<string, { model: string; base_url: string }> = {
+                  const presets: Record<string, { base_url: string }> = {
                     grsai: {
-                      model: "gpt-5.4",
                       base_url: "https://grsai.dakka.com.cn/v1",
                     },
-                    openai: { model: "gpt-4o", base_url: "https://api.openai.com/v1" },
+                    openai: { base_url: "https://api.openai.com/v1" },
                     anthropic: {
-                      model: "claude-3-5-sonnet-20241022",
                       base_url: "https://api.anthropic.com",
                     },
                     deepseek: {
-                      model: "deepseek-chat",
                       base_url: "https://api.deepseek.com",
                     },
                   };
@@ -410,7 +407,6 @@ export default function AgentDetailPage() {
                   void applyLlm({
                     ...agent.llm,
                     provider,
-                    model: preset?.model || agent.llm.model,
                     base_url: preset?.base_url || custom?.base_url || agent.llm.base_url,
                   });
                 }}
@@ -427,24 +423,6 @@ export default function AgentDetailPage() {
                     </option>
                   ))}
               </select>
-            </label>
-            <label>
-              Model
-              <input
-                value={agent.llm.model}
-                disabled={saving}
-                onChange={(e) =>
-                  setAgent({ ...agent, llm: { ...agent.llm, model: e.target.value } })
-                }
-                onBlur={(e) =>
-                  void applyLlm({ ...agent.llm, model: e.target.value.trim() })
-                }
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.currentTarget.blur();
-                  }
-                }}
-              />
             </label>
             <label>
               Temperature

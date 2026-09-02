@@ -16,7 +16,7 @@ type Overview = {
     role: string;
     title: string;
     enabled: boolean;
-    llm: { provider: string; model: string };
+    llm: { provider: string };
     tools_enabled: string[];
     skills_count: number;
     mcp_count: number;
@@ -124,7 +124,7 @@ export default function OverviewPage() {
             <Link className="card" key={a.role} href={`/agents/${a.role}`}>
               <h3>{a.title}</h3>
               <p className="meta">
-                {a.llm.provider} / {a.llm.model}
+                {a.llm.provider} / 模型中心
               </p>
               <p className="meta">
                 Skills {a.skills_count} · Tools {a.tools_enabled.length} · MCP {a.mcp_count}

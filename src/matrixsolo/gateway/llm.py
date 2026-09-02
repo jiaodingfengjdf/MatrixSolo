@@ -435,10 +435,9 @@ class LLMGateway:
                 msgs.insert(0, {"role": "system", "content": composed})
         llm = profile.llm
         logger.info(
-            "chat_for_role role=%s provider=%s model=%s",
+            "chat_for_role role=%s provider=%s",
             role,
             llm.provider,
-            llm.model,
         )
         if as_json:
             return await self.chat_json(
@@ -447,7 +446,6 @@ class LLMGateway:
                 temperature=llm.temperature,
                 max_tokens=llm.max_tokens,
                 provider=llm.provider,
-                model=llm.model,
                 base_url=llm.base_url or None,
             )
         return await self.chat(
@@ -456,7 +454,6 @@ class LLMGateway:
             temperature=llm.temperature,
             max_tokens=llm.max_tokens,
             provider=llm.provider,
-            model=llm.model,
             base_url=llm.base_url or None,
         )
 
