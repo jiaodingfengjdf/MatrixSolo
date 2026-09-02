@@ -134,4 +134,4 @@ def default_profiles() -> dict[str, AgentProfile]:
             ],
         ),
     ]
-    return {p.role.value: p for p in profiles}
+    return {p.role: p for p in profiles}

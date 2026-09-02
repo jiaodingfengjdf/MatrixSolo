@@ -73,6 +73,9 @@ class PromptSkill(BaseModel):
     name: str
     content: str
     enabled: bool = True
+    skill_type: Literal["prompt", "runtime", "mcp", "http"] = "prompt"
+    allowed_tools: list[str] = Field(default_factory=list)
+    mcp_server: str = ""
     source: Literal["manual", "upload", "url", "feishu"] = "manual"
     origin: str = ""
     description: str = ""
@@ -91,7 +94,8 @@ class McpServerConfig(BaseModel):
 
 
 class AgentProfile(BaseModel):
-    role: AgentRoleKey
+    # 员工 id：不再要求属于五值枚举，新入职员工使用稳定 slug
+    role: str = "strategy"
     title: str
     identity: str = ""
     personality: str = ""

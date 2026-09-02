@@ -115,6 +115,41 @@ export type PromptVersion = {
   created_at: string;
 };
 
+export type Employee = {
+  id: string;
+  title: string;
+  display_name: string;
+  function: string;
+  app_id: string;
+  app_secret_masked?: string;
+  has_credentials?: boolean;
+  department_ids: string[];
+  avatar_name: string;
+  voice_id: string;
+  portrait_asset_id: string;
+  enabled: boolean;
+  builtin: boolean;
+  created_at: string;
+  updated_at: string;
+  profile?: AgentProfile;
+};
+
+export type PolishDraft = {
+  employee_id: string;
+  draft: Record<string, string>;
+  llm_generated: boolean;
+};
+
+export type ToolAudit = {
+  ts: string;
+  employee_id: string;
+  tool: string;
+  kind: string;
+  ok: boolean;
+  error: string;
+  duration_ms: number;
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     headers: {
@@ -255,6 +290,40 @@ export const api = {
   },
   createWorkLog: (body: Partial<WorkLog>) =>
     request<WorkLog>("/api/admin/work-logs", { method: "POST", body: JSON.stringify(body) }),
+  // 员工 / 入职 / 一键润色
+  listEmployees: () => request<{ items: Employee[] }>("/api/admin/employees"),
+  getEmployee: (id: string) => request<Employee>(`/api/admin/employees/${id}`),
+  createEmployee: (body: Partial<Employee> & { app_secret?: string }) =>
+    request<Employee>("/api/admin/employees", { method: "POST", body: JSON.stringify(body) }),
+  updateEmployee: (id: string, body: Partial<Employee>) =>
+    request<Employee>(`/api/admin/employees/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  polishEmployee: (id: string, body: { one_liner: string; department?: string; on_camera?: boolean; clone_from?: string }) =>
+    request<PolishDraft>(`/api/admin/employees/${id}/polish`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  applyPolish: (id: string, draft: Record<string, string>) =>
+    request<AgentProfile>(`/api/admin/employees/${id}/polish/apply`, {
+      method: "POST",
+      body: JSON.stringify({ draft }),
+    }),
+  disableEmployee: (id: string) =>
+    request<Employee>(`/api/admin/employees/${id}/disable`, { method: "POST" }),
+  enableEmployee: (id: string) =>
+    request<Employee>(`/api/admin/employees/${id}/enable`, { method: "POST" }),
+  reloadWorkers: () =>
+    request<{ ok: boolean; reloaded?: boolean }>("/api/admin/workers/reload", { method: "POST" }),
+  // 工具审计
+  listToolAudit: (params: Record<string, string | number> = {}) => {
+    const qs = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== "") qs.set(k, String(v));
+    });
+    return request<{ items: ToolAudit[] }>(`/api/admin/tool-audit?${qs.toString()}`);
+  },
 };
 
 export type StudioBoard = {

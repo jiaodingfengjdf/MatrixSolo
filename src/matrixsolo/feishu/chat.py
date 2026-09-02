@@ -14,7 +14,13 @@ from typing import Any
 
 from matrixsolo.config import get_settings
 from matrixsolo.feishu.client import FeishuClient
-from matrixsolo.feishu.staff import ROLE_TITLES, AgentRole, resolve_staff_apps
+from matrixsolo.feishu.staff import (
+    ROLE_TITLES,
+    AgentRole,
+    employee_title,
+    employee_title_map,
+    resolve_staff_apps,
+)
 from matrixsolo.gateway import TaskKind, get_gateway
 
 logger = logging.getLogger(__name__)
@@ -101,7 +107,7 @@ def _dedupe(event_id: str) -> bool:
         return True
 
 
-def resolve_role_from_event(payload: dict[str, Any]) -> AgentRole | None:
+def resolve_role_from_event(payload: dict[str, Any]) -> str | None:
     header = payload.get("header") or {}
     app_id = header.get("app_id") or ""
     apps = resolve_staff_apps()
@@ -111,12 +117,13 @@ def resolve_role_from_event(payload: dict[str, Any]) -> AgentRole | None:
 
     event = payload.get("event") or {}
     message = event.get("message") or {}
+    title_map = employee_title_map()
     for m in message.get("mentions") or []:
         name = (m.get("name") or "").strip()
-        if name in TITLE_TO_ROLE:
-            return TITLE_TO_ROLE[name]
+        if name in title_map:
+            return title_map[name]
     text = extract_text(message)
-    for title, role in TITLE_TO_ROLE.items():
+    for title, role in title_map.items():
         if f"@{title}" in text:
             return role
     return None
@@ -157,7 +164,7 @@ def extract_text(message: dict[str, Any]) -> str:
             texts.append(_flatten_post(val.get("content") or []))
     text = " ".join(t for t in texts if t)
     text = re.sub(r"@_user_\d+", "", text)
-    for title in ROLE_TITLES.values():
+    for title in employee_title_map().values():
         text = text.replace(f"@{title}", "")
     return text.strip()
 
@@ -181,20 +188,21 @@ def _flatten_post(blocks: Any) -> str:
     return " ".join(chunks)
 
 
-def _mention_name_to_role(name: str) -> AgentRole | None:
+def _mention_name_to_role(name: str) -> str | None:
     name = (name or "").strip()
     if not name:
         return None
-    if name in TITLE_TO_ROLE:
-        return TITLE_TO_ROLE[name]
-    for title, role in TITLE_TO_ROLE.items():
+    title_map = employee_title_map()
+    if name in title_map:
+        return title_map[name]
+    for title, role in title_map.items():
         if title and title in name:
             return role
     return None
 
 
-def extract_mentioned_roles(message: dict[str, Any]) -> set[AgentRole]:
-    roles: set[AgentRole] = set()
+def extract_mentioned_roles(message: dict[str, Any]) -> set[str]:
+    roles: set[str] = set()
     for item in message.get("mentions") or []:
         names: list[str] = []
         if isinstance(item, dict):
@@ -210,22 +218,22 @@ def extract_mentioned_roles(message: dict[str, Any]) -> set[AgentRole]:
                 roles.add(role)
     raw = message.get("content") or ""
     blob = raw if isinstance(raw, str) else json.dumps(raw, ensure_ascii=False)
-    for title, role in TITLE_TO_ROLE.items():
+    for title, role in employee_title_map().items():
         if f"@{title}" in blob:
             roles.add(role)
     return roles
 
 
-def huddle_leader(mentioned: set[AgentRole]) -> AgentRole:
-    if AgentRole.STRATEGY in mentioned:
-        return AgentRole.STRATEGY
+def huddle_leader(mentioned: set[str]) -> str:
+    if "strategy" in mentioned:
+        return "strategy"
     for role in (AgentRole.VISUAL, AgentRole.SCRIPT, AgentRole.EDITOR, AgentRole.OPS):
-        if role in mentioned:
-            return role
-    return AgentRole.STRATEGY
+        if role.value in mentioned:
+            return role.value
+    return "strategy"
 
 
-def should_huddle(mentioned: set[AgentRole], text: str) -> bool:
+def should_huddle(mentioned: set[str], text: str) -> bool:
     """群里不 @ 或 @ 多人 / 开工，都走五岗工作流。单独 @ 一岗才一对一。"""
     if HUDDLE_ASK.search(text or ""):
         return True
@@ -328,7 +336,7 @@ async def handle_card_action(payload: dict[str, Any]) -> dict[str, Any]:
                 await FeishuClient().send_text(
                     chat_id,
                     f"卡片处理失败：{exc}",
-                    role=AgentRole.STRATEGY,
+                    role="strategy",
                 )
             except Exception:  # noqa: BLE001
                 logger.exception("Feishu card error notice failed")
@@ -396,22 +404,22 @@ async def handle_im_message(payload: dict[str, Any]) -> dict[str, Any]:
     if is_install_intent(text, file_name):
         reply = await _install_skill_from_message(role, text, message_id, file_key, file_name)
         await _deliver(role, chat_id, message_id, reply)
-        return {"code": 0, "msg": "installed", "role": role.value}
+        return {"code": 0, "msg": "installed", "role": role}
 
     if not text:
         return {"code": 0, "msg": "empty"}
 
     stamp = message_stamp(chat_id, message_id, text)
     if not _dedupe(stamp):
-        _trace_feishu("skip-dup", role=role.value, stamp=stamp, text=text[:80])
-        return {"code": 0, "msg": "duplicate-message", "role": role.value}
+        _trace_feishu("skip-dup", role=role, stamp=stamp, text=text[:80])
+        return {"code": 0, "msg": "duplicate-message", "role": role}
 
     mentioned = extract_mentioned_roles(message)
     huddle = should_huddle(mentioned, text)
     _trace_feishu(
         "in",
-        role=role.value,
-        mentioned=[r.value for r in mentioned],
+        role=role,
+        mentioned=[str(r) for r in mentioned],
         huddle=huddle,
         text=text[:120],
         message_id=message_id,
@@ -419,12 +427,12 @@ async def handle_im_message(payload: dict[str, Any]) -> dict[str, Any]:
     )
     if huddle:
         claim = huddle_claim_id(chat_id, message_id, text)
-        if not try_claim_huddle(claim, role.value):
-            _trace_feishu("skip-claimed", role=role.value, claim=claim, text=text[:80])
-            return {"code": 0, "msg": "huddle-claimed", "role": role.value}
+        if not try_claim_huddle(claim, str(role)):
+            _trace_feishu("skip-claimed", role=str(role), claim=claim, text=text[:80])
+            return {"code": 0, "msg": "huddle-claimed", "role": role}
         logger.info(
             "Feishu huddle by %s roles=%s text=%s",
-            role.value,
+            role,
             [r.value for r in mentioned],
             text[:80],
         )
@@ -436,12 +444,12 @@ async def handle_im_message(payload: dict[str, Any]) -> dict[str, Any]:
             message_id=message_id,
             mentioned=mentioned or {role},
         )
-        return {"code": 0, "msg": "huddle", "role": role.value}
+        return {"code": 0, "msg": "huddle", "role": role}
 
-    logger.info("Feishu chat role=%s text=%s", role.value, text[:80])
+    logger.info("Feishu chat role=%s text=%s", role, text[:80])
     reply, images = await _generate_reply(role, text)
     await _deliver(role, chat_id, message_id, reply, images)
-    return {"code": 0, "msg": "replied", "role": role.value}
+    return {"code": 0, "msg": "replied", "role": role}
 
 
 def _resolve_image_file(raw: str) -> str | None:
@@ -495,7 +503,7 @@ def _merge_image_paths(*groups: list[str] | None) -> list[str]:
 
 
 async def _deliver(
-    role: AgentRole,
+    role: str,
     chat_id: str,
     message_id: str,
     reply: str,
@@ -504,7 +512,7 @@ async def _deliver(
     client = FeishuClient()
     text, embedded = _extract_local_images(reply or "")
     files = _merge_image_paths(images, embedded)
-    logger.info("Feishu deliver role=%s images=%s chat=%s", role.value, len(files), bool(chat_id))
+    logger.info("Feishu deliver role=%s images=%s chat=%s", role, len(files), bool(chat_id))
     if text:
         if message_id:
             ok = await client.reply_text(message_id, text, role=role)
@@ -519,7 +527,7 @@ async def _deliver(
             sent = await client.reply_image(message_id, path, role=role)
         if not sent:
             failed.append(path)
-            logger.error("Feishu image deliver failed [%s]: %s", role.value, path)
+            logger.error("Feishu image deliver failed [%s]: %s", role, path)
     if failed:
         note = "图已生成，但飞书没发出去。给视觉机器人开通「获取与上传图片或文件资源」权限后再试。"
         if chat_id:
@@ -529,7 +537,7 @@ async def _deliver(
 
 
 async def _install_skill_from_message(
-    role: AgentRole,
+    role: str,
     text: str,
     message_id: str,
     file_key: str,
@@ -543,7 +551,6 @@ async def _install_skill_from_message(
         parse_skill_bytes,
     )
 
-    title = ROLE_TITLES[role]
     try:
         pack = None
         raw = b""
@@ -568,17 +575,17 @@ async def _install_skill_from_message(
         else:
             return "把 SKILL.md、zip，或技能地址发我，我才能装。"
 
-        skill = install_skill_package(role.value, pack, raw=raw, filename=filename)
-        get_profile_store().install_skill(role.value, skill)
+        skill = install_skill_package(role, pack, raw=raw, filename=filename)
+        get_profile_store().install_skill(role, skill)
         return f"已学会《{skill.name}》。下次相关任务我会直接用，不用再教一遍。"
     except SkillInstallError as exc:
         return f"这个技能我没装上：{exc}"
     except Exception as exc:  # noqa: BLE001
-        logger.exception("Feishu skill install failed [%s]", role.value)
+        logger.exception("Feishu skill install failed [%s]", role)
         return f"安装技能时卡住了：{exc}"
 
 
-async def _generate_reply(role: AgentRole, user_text: str) -> tuple[str, list[str]]:
+async def _generate_reply(role: str, user_text: str) -> tuple[str, list[str]]:
     from matrixsolo.admin.chat_memory import as_chat_messages, remember
     from matrixsolo.admin.store import get_profile_store
     from matrixsolo.skills.runtime import (
@@ -591,26 +598,26 @@ async def _generate_reply(role: AgentRole, user_text: str) -> tuple[str, list[st
     )
 
     gateway = get_gateway()
-    title = ROLE_TITLES[role]
-    profile = get_profile_store().get(role.value)
+    title = employee_title(role)
+    profile = get_profile_store().get_or_create(role)
     runtime = SkillRuntime()
     images: list[str] = []
     try:
         observations: list[str] = []
         want_image = (
-            role == AgentRole.VISUAL
+            role == "visual"
             and can_image_gen(profile)
             and bool(IMAGE_ASK.search(user_text))
         )
         if (
-            role == AgentRole.STRATEGY
+            role == "strategy"
             and profile.has_tool("hot_radar")
             and RADAR_ASK.search(user_text)
         ):
             radar = await runtime.hot_radar()
             observations.append("【已执行 hot_radar】\n" + json.dumps(radar, ensure_ascii=False)[:4000])
 
-        history = as_chat_messages(role.value, limit=8)
+        history = as_chat_messages(role, limit=8)
         user_payload = (
             f"【飞书群聊】老板刚 @「{title}」。\n"
             f"{enabled_skill_guide(profile)}\n"
@@ -637,7 +644,7 @@ async def _generate_reply(role: AgentRole, user_text: str) -> tuple[str, list[st
         user_payload += user_text
 
         result = await gateway.chat_for_role(
-            role.value,
+            role,
             [*history, {"role": "user", "content": user_payload}],
             kind=TaskKind.CREATIVE,
             as_json=False,
@@ -647,7 +654,7 @@ async def _generate_reply(role: AgentRole, user_text: str) -> tuple[str, list[st
         if (
             call
             and str(call.get("skill") or "").strip() in IMAGE_SKILL_ALIASES
-            and role != AgentRole.VISUAL
+            and role != "visual"
         ):
             call = None
             text = "出图归顾帧，我这边不调生图。"
@@ -672,7 +679,7 @@ async def _generate_reply(role: AgentRole, user_text: str) -> tuple[str, list[st
                 raw_paths = [raw_paths]
             images = [str(p) for p in raw_paths if str(p).strip()]
             follow = await gateway.chat_for_role(
-                role.value,
+                role,
                 [
                     *history,
                     {"role": "user", "content": user_payload},
@@ -711,10 +718,10 @@ async def _generate_reply(role: AgentRole, user_text: str) -> tuple[str, list[st
 
         if not text:
             text = f"嗯，我是{title}，这条我先记下。"
-        remember(role.value, user_text, text)
+        remember(role, user_text, text)
         return text, images
     except Exception as exc:  # noqa: BLE001
-        logger.exception("LLM reply failed for %s", role.value)
+        logger.exception("LLM reply failed for %s", role)
         return f"我是{title}。刚才卡了一下：{exc}", images
 
 
@@ -883,7 +890,7 @@ def run_feishu_ws_bot(
             event_handler=handler,
             log_level=lark.LogLevel.INFO,
         )
-        title = ROLE_TITLES.get(AgentRole(role_value), role_value)
+        title = employee_title(role_value)
         log.info("Feishu WS connecting [%s] app_id=%s", title, app_id)
         cli.start()
     except Exception:  # noqa: BLE001
@@ -911,7 +918,6 @@ class FeishuChatWorker:
             logger.info("Feishu chat worker disabled")
             return
 
-        apps = resolve_staff_apps()
         _reap_stale_ws()
         ctx = mp.get_context("spawn")
         self._queue = ctx.Queue()
@@ -920,32 +926,54 @@ class FeishuChatWorker:
         except RuntimeError:
             self._loop = asyncio.get_event_loop()
         threading.Thread(target=self._consume, name="feishu-huddle-bus", daemon=True).start()
+
+        threading.Thread(target=self._boot, name="feishu-ws-boot", daemon=True).start()
+
+    def _boot(self) -> None:
+        """按当前员工注册表拉起所有启用且已配置凭证的 Feishu WS 子进程."""
+        ctx = mp.get_context("spawn")
         parent_pid = os.getpid()
+        apps = resolve_staff_apps()
+        for role, app in apps.items():
+            if self._stop.is_set():
+                break
+            if not (app.app_id and app.app_secret):
+                continue
+            proc = ctx.Process(
+                target=run_feishu_ws_bot,
+                args=(role, app.app_id, app.app_secret, self._queue, parent_pid),
+                name=f"feishu-ws-{role}",
+                daemon=True,
+            )
+            proc.start()
+            self._procs.append(proc)
+            logger.info(
+                "Feishu WS process started for %s pid=%s (%s)",
+                employee_title(role),
+                proc.pid,
+                app.app_id,
+            )
+            time.sleep(0.8)
+        _write_ws_pids([p.pid for p in self._procs if p.pid])
 
-        def _boot() -> None:
-            for role, app in apps.items():
-                if self._stop.is_set():
-                    break
-                if not (app.app_id and app.app_secret):
-                    continue
-                proc = ctx.Process(
-                    target=run_feishu_ws_bot,
-                    args=(role.value, app.app_id, app.app_secret, self._queue, parent_pid),
-                    name=f"feishu-ws-{role.value}",
-                    daemon=True,
-                )
-                proc.start()
-                self._procs.append(proc)
-                logger.info(
-                    "Feishu WS process started for %s pid=%s (%s)",
-                    ROLE_TITLES[role],
-                    proc.pid,
-                    app.app_id,
-                )
-                time.sleep(0.8)
-            _write_ws_pids([p.pid for p in self._procs if p.pid])
-
-        threading.Thread(target=_boot, name="feishu-ws-boot", daemon=True).start()
+    def reload_apps(self) -> dict[str, Any]:
+        """热重载：停掉旧 WS 子进程并按注册表重新拉起（新员工上岗/停用即时生效）."""
+        started = bool(self._loop and self._queue)
+        if not started:
+            self.start()
+            return {"ok": True, "reloaded": True, "note": "worker was not running; started"}
+        for proc in self._procs:
+            if proc.is_alive():
+                proc.terminate()
+        for proc in self._procs:
+            proc.join(timeout=3)
+            if proc.is_alive():
+                proc.kill()
+        self._procs.clear()
+        if self._stop.is_set():
+            self._stop.clear()
+        threading.Thread(target=self._boot, name="feishu-ws-reload", daemon=True).start()
+        return {"ok": True, "reloaded": True}
 
     def _consume(self) -> None:
         import queue as queue_mod

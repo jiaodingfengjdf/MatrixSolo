@@ -35,6 +35,9 @@ class SkillPackage:
     content: str
     origin: str = ""
     source: SkillSource = "upload"
+    skill_type: Literal["prompt", "runtime", "mcp", "http"] = "prompt"
+    allowed_tools: list[str] | None = None
+    mcp_server: str = ""
 
 
 def parse_skill_md(raw: str, *, fallback_name: str = "untitled-skill") -> SkillPackage:
@@ -43,6 +46,9 @@ def parse_skill_md(raw: str, *, fallback_name: str = "untitled-skill") -> SkillP
         raise SkillInstallError("空的技能文件")
     name = fallback_name
     description = ""
+    skill_type: Literal["prompt", "runtime", "mcp", "http"] = "prompt"
+    allowed_tools: list[str] = []
+    mcp_server = ""
     body = text
     match = _FRONTMATTER.match(text)
     if match:
@@ -50,12 +56,26 @@ def parse_skill_md(raw: str, *, fallback_name: str = "untitled-skill") -> SkillP
         meta = _parse_simple_yaml(meta_raw)
         name = str(meta.get("name") or name).strip() or fallback_name
         description = str(meta.get("description") or "").strip()
+        raw_type = str(meta.get("type") or "prompt").strip().lower()
+        if raw_type in {"prompt", "runtime", "mcp", "http"}:
+            skill_type = raw_type  # type: ignore[assignment]
+        allowed_tools = [
+            t.strip() for t in str(meta.get("allowed_tools") or "").replace(",", " ").split() if t.strip()
+        ]
+        mcp_server = str(meta.get("mcp_server") or "").strip()
     if not body:
         raise SkillInstallError("SKILL.md 没有正文")
     if not description:
         description = body.splitlines()[0][:180]
     content = body if not description else f"{description}\n\n{body}"
-    return SkillPackage(name=name[:64], description=description[:1024], content=content[:20000])
+    return SkillPackage(
+        name=name[:64],
+        description=description[:1024],
+        content=content[:20000],
+        skill_type=skill_type,
+        allowed_tools=allowed_tools,
+        mcp_server=mcp_server,
+    )
 
 
 def parse_skill_bytes(data: bytes, filename: str = "") -> SkillPackage:
@@ -118,7 +138,9 @@ def persist_pack_files(role: str, skill_id: str, raw: bytes, filename: str, pack
     root.mkdir(parents=True, exist_ok=True)
     desc = pack.description.replace("\n", " ").replace(":", "：")
     (root / "SKILL.md").write_text(
-        f"---\nname: {pack.name}\ndescription: {desc}\n---\n\n{pack.content}\n",
+        f"---\nname: {pack.name}\ndescription: {desc}\ntype: {pack.skill_type}\n"
+        f"allowed_tools: {' '.join(pack.allowed_tools or [])}\nmcp_server: {pack.mcp_server}\n"
+        f"---\n\n{pack.content}\n",
         encoding="utf-8",
     )
     if filename:
@@ -135,6 +157,9 @@ def to_prompt_skill(pack: SkillPackage) -> PromptSkill:
         name=pack.name,
         content=pack.content,
         enabled=True,
+        skill_type=pack.skill_type,
+        allowed_tools=pack.allowed_tools or [],
+        mcp_server=pack.mcp_server,
         source=pack.source,
         origin=pack.origin,
         description=pack.description,

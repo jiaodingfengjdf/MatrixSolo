@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from matrixsolo.admin.employees import (
+    EmployeeCreate,
+    EmployeePolishRequest,
+    EmployeeUpdate,
+    get_employee_store,
+)
 from matrixsolo.admin.mcp_runtime import RoleMcpRuntime
 from matrixsolo.admin.model_center import (
     ModelProviderCreate,
@@ -23,12 +30,27 @@ from matrixsolo.admin.models import (
     PromptSkillCreate,
     PromptSkillUpdate,
 )
+from matrixsolo.admin.polish import PERSONA_FIELDS, polish_draft
 from matrixsolo.admin.store import get_profile_store
+from matrixsolo.admin.tool_audit import get_tool_audit_store
 from matrixsolo.admin.work_logs import WorkLogCreate, get_work_log_store, record_work_log
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+logger = logging.getLogger(__name__)
 
 _NO_STORE = {"Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "no-cache"}
+
+
+def _reload_ws_worker() -> bool:
+    """入职/停用后热重载飞书长连接；失败不阻断主流程."""
+    try:
+        from matrixsolo.feishu.chat import get_chat_worker
+
+        get_chat_worker().reload_apps()
+        return True
+    except Exception:  # noqa: BLE001
+        logger.debug("ws reload skipped")
+        return False
 
 
 def _profile_ok(profile: AgentProfile) -> JSONResponse:
@@ -59,6 +81,10 @@ class PromptStudioUpdate(BaseModel):
 
 class PromptRollbackRequest(BaseModel):
     version: int
+
+
+class PolishApplyRequest(BaseModel):
+    draft: dict[str, str]
 
 
 @router.get("/agents")
@@ -194,6 +220,132 @@ async def delete_model_slot(slot_id: str) -> dict[str, Any]:
     except KeyError as exc:
         raise HTTPException(404, str(exc)) from exc
     return {"ok": True}
+
+
+# --------------------------------------------------------------------------- #
+# 员工入职 / 一键润色 / 工具审计（PRD 模块 8 / 2）
+# --------------------------------------------------------------------------- #
+@router.get("/employees")
+async def list_employees() -> dict[str, Any]:
+    return {"items": [e.dump_admin() for e in get_employee_store().list()]}
+
+
+@router.post("/employees")
+async def create_employee(body: EmployeeCreate) -> dict[str, Any]:
+    try:
+        employee = get_employee_store().create(body)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    # 入职即建人设（骨架）并热重载 WS，之后可一键润色上岗
+    get_profile_store().get_or_create(employee.id)
+    _reload_ws_worker()
+    return employee.dump_admin()
+
+
+@router.get("/employees/{employee_id}")
+async def get_employee(employee_id: str) -> dict[str, Any]:
+    employee = get_employee_store().get(employee_id)
+    if not employee:
+        raise HTTPException(404, f"employee not found: {employee_id}")
+    profile = get_profile_store().get_or_create(employee_id)
+    data = employee.dump_admin()
+    data["profile"] = profile.dump_admin() if profile else None
+    return data
+
+
+@router.put("/employees/{employee_id}")
+async def update_employee(employee_id: str, body: EmployeeUpdate) -> dict[str, Any]:
+    try:
+        employee = get_employee_store().update(employee_id, body)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return employee.dump_admin()
+
+
+@router.post("/employees/{employee_id}/polish")
+async def polish_employee(
+    employee_id: str, body: EmployeePolishRequest
+) -> dict[str, Any]:
+    employee = get_employee_store().get(employee_id)
+    if not employee:
+        raise HTTPException(404, f"employee not found: {employee_id}")
+    return await polish_draft(employee, body)
+
+
+@router.post("/employees/{employee_id}/polish/apply")
+async def apply_polish(
+    employee_id: str, body: PolishApplyRequest
+) -> JSONResponse:
+    # 确认润色：把草稿写入人设并追加 source=polish 版本（可回滚）
+    from matrixsolo.admin.models import AgentProfilePatch
+
+    draft = {k: str(v) for k, v in body.draft.items() if k in PERSONA_FIELDS}
+    try:
+        profile = get_profile_store().update(
+            employee_id,
+            AgentProfilePatch(**draft),
+            version_source="polish",
+            version_note="一键润色确认",
+        )
+    except KeyError as exc:
+        # 员工存在但 profile 未建（异常时序）→ 懒创建后重试
+        if get_employee_store().get(employee_id) is None:
+            raise HTTPException(404, str(exc)) from exc
+        get_profile_store().get_or_create(employee_id)
+        profile = get_profile_store().update(
+            employee_id,
+            AgentProfilePatch(**draft),
+            version_source="polish",
+            version_note="一键润色确认",
+        )
+    return _profile_ok(profile)
+
+
+@router.post("/employees/{employee_id}/disable")
+async def disable_employee(employee_id: str) -> dict[str, Any]:
+    try:
+        employee = get_employee_store().set_enabled(employee_id, False)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    _reload_ws_worker()
+    return employee.dump_admin()
+
+
+@router.post("/employees/{employee_id}/enable")
+async def enable_employee(employee_id: str) -> dict[str, Any]:
+    try:
+        employee = get_employee_store().set_enabled(employee_id, True)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    _reload_ws_worker()
+    return employee.dump_admin()
+
+
+@router.post("/workers/reload")
+async def reload_workers() -> dict[str, Any]:
+    from matrixsolo.feishu.chat import get_chat_worker
+
+    try:
+        return get_chat_worker().reload_apps()
+    except Exception as exc:
+        raise HTTPException(500, str(exc)) from exc
+
+
+@router.get("/tool-audit")
+async def list_tool_audit(
+    limit: int = 200,
+    employee_id: str | None = None,
+    kind: str | None = None,
+    tool: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "items": get_tool_audit_store().list(
+            limit=limit,
+            employee_id=employee_id,
+            kind=kind,
+            tool=tool,
+        )
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -420,7 +572,7 @@ async def system_overview() -> dict[str, Any]:
         "feishu_staff": staff_status(s),
         "agents": [
             {
-                "role": a.role.value,
+                "role": a.role,
                 "title": a.title,
                 "enabled": a.enabled,
                 "llm": a.llm.model_dump(),

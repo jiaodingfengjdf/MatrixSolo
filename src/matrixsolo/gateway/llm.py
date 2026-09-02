@@ -269,7 +269,7 @@ class LLMGateway:
         """按管理台岗位配置路由模型，并注入 composed system prompt（若 messages 无 system）。"""
         from matrixsolo.admin.store import get_profile_store
 
-        profile = get_profile_store().get(role)
+        profile = get_profile_store().get_or_create(role)
         composed = profile.composed_system_prompt()
         msgs = list(messages)
         if composed:

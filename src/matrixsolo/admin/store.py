@@ -138,7 +138,41 @@ class ProfileStore:
                 raise KeyError(key)
             return profiles[key]
 
-    def update(self, role: str, patch: AgentProfilePatch) -> AgentProfile:
+    def get_or_create(self, role: str) -> AgentProfile:
+        """按员工注册表懒创建人设；已存在则直接返回."""
+        key = role.value if isinstance(role, AgentRoleKey) else role
+        try:
+            return self.get(key)
+        except KeyError:
+            profile = self._skeleton_profile(key)
+            with self._lock:
+                profiles = self._read()
+                profiles[key] = profile
+                self._write(profiles)
+            return profile
+
+    def _skeleton_profile(self, role: str) -> AgentProfile:
+        from matrixsolo.admin.employees import get_employee_store
+        from matrixsolo.admin.polish import default_persona_blocks
+
+        employee = get_employee_store().get(role)
+        title = (employee.title if employee else role) or role
+        blocks = default_persona_blocks(title=title, function=(employee.function if employee else "") or role)
+        return AgentProfile(
+            role=role,
+            title=title,
+            enabled=True,
+            **blocks,
+        )
+
+    def update(
+        self,
+        role: str,
+        patch: AgentProfilePatch,
+        *,
+        version_source: str = "manual",
+        version_note: str = "",
+    ) -> AgentProfile:
         with self._lock:
             profiles = self._read()
             if role not in profiles:
@@ -152,7 +186,13 @@ class ProfileStore:
             updated = AgentProfile.model_validate(data)
             profiles[role] = updated
             self._write(profiles)
-            self._record_version_if_changed(role, current, updated, source="manual")
+            self._record_version_if_changed(
+                role,
+                current,
+                updated,
+                source=version_source,
+                note=version_note,
+            )
             return updated
 
     def _record_version_if_changed(

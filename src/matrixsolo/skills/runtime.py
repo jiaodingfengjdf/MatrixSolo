@@ -153,6 +153,27 @@ class SkillRuntime:
     """内置可执行技能：联网、基础爬虫、热榜、生图。"""
 
     async def run(self, key: str, profile: AgentProfile, **kwargs: Any) -> dict[str, Any]:
+        import time
+
+        from matrixsolo.admin.tool_audit import get_tool_audit_store
+
+        started = time.perf_counter()
+        result = await self._run(key, profile, **kwargs)
+        try:
+            get_tool_audit_store().append(
+                employee_id=profile.role,
+                tool=key,
+                kind="runtime",
+                ok=bool(result.get("ok")),
+                error=str(result.get("error") or ""),
+                duration_ms=(time.perf_counter() - started) * 1000,
+                params=kwargs,
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("tool audit failed")
+        return result
+
+    async def _run(self, key: str, profile: AgentProfile, **kwargs: Any) -> dict[str, Any]:
         key = str(key or "").strip()
         if key in IMAGE_SKILL_ALIASES:
             if not can_image_gen(profile):

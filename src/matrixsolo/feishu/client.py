@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 
 from matrixsolo.config import Settings, get_settings
-from matrixsolo.feishu.staff import AgentRole, StaffApp, resolve_staff_apps
+from matrixsolo.feishu.staff import StaffApp, employee_title, resolve_staff_apps
 from matrixsolo.models import WorkflowState
 
 logger = logging.getLogger(__name__)
@@ -20,18 +20,18 @@ class FeishuClient:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
         self._staff = resolve_staff_apps(self.settings)
-        self._tokens: dict[AgentRole, tuple[str, float]] = {}
+        self._tokens: dict[str, tuple[str, float]] = {}
 
-    def app_for(self, role: AgentRole) -> StaffApp:
+    def app_for(self, role: str) -> StaffApp:
         return self._staff[role]
 
-    def configured(self, role: AgentRole | None = None) -> bool:
+    def configured(self, role: str | None = None) -> bool:
         if role is None:
             return any(a.app_id and a.app_secret for a in self._staff.values())
         app = self._staff[role]
         return bool(app.app_id and app.app_secret)
 
-    async def get_tenant_access_token(self, role: AgentRole = AgentRole.STRATEGY) -> str | None:
+    async def get_tenant_access_token(self, role: str = "strategy") -> str | None:
         app = self._staff[role]
         if not (app.app_id and app.app_secret):
             return None
@@ -46,7 +46,7 @@ class FeishuClient:
             )
             data = resp.json()
             if data.get("code") != 0:
-                logger.error("Feishu token error [%s/%s]: %s", role.value, app.title, data)
+                logger.error("Feishu token error [%s/%s]: %s", str(role), app.title, data)
                 return None
             token = data["tenant_access_token"]
             expire = float(data.get("expire", 7200))
@@ -58,7 +58,7 @@ class FeishuClient:
         chat_id: str,
         card: dict[str, Any],
         *,
-        role: AgentRole = AgentRole.STRATEGY,
+        role: str = "strategy",
     ) -> str | None:
         token = await self.get_tenant_access_token(role)
         staff = self.app_for(role)
@@ -82,7 +82,7 @@ class FeishuClient:
             data = resp.json()
             if data.get("code") != 0:
                 logger.error(
-                    "Feishu send failed [%s/%s]: %s", role.value, staff.title, data
+                    "Feishu send failed [%s/%s]: %s", str(role), staff.title, data
                 )
                 return None
             return (data.get("data") or {}).get("message_id")
@@ -92,7 +92,7 @@ class FeishuClient:
         message_id: str,
         text: str,
         *,
-        role: AgentRole = AgentRole.STRATEGY,
+        role: str = "strategy",
     ) -> bool:
         token = await self.get_tenant_access_token(role)
         if not token:
@@ -108,7 +108,7 @@ class FeishuClient:
             )
             data = resp.json()
             if data.get("code") != 0:
-                logger.error("Feishu reply failed [%s]: %s", role.value, data)
+                logger.error("Feishu reply failed [%s]: %s", str(role), data)
                 return False
             return True
 
@@ -117,7 +117,7 @@ class FeishuClient:
         chat_id: str,
         text: str,
         *,
-        role: AgentRole = AgentRole.STRATEGY,
+        role: str = "strategy",
     ) -> str | None:
         token = await self.get_tenant_access_token(role)
         if not token:
@@ -135,11 +135,11 @@ class FeishuClient:
             )
             data = resp.json()
             if data.get("code") != 0:
-                logger.error("Feishu send_text failed [%s]: %s", role.value, data)
+                logger.error("Feishu send_text failed [%s]: %s", str(role), data)
                 return None
             return (data.get("data") or {}).get("message_id")
 
-    async def upload_image(self, path: str, *, role: AgentRole = AgentRole.STRATEGY) -> str | None:
+    async def upload_image(self, path: str, *, role: str = "strategy") -> str | None:
         token = await self.get_tenant_access_token(role)
         if not token:
             return None
@@ -170,7 +170,7 @@ class FeishuClient:
                 )
             data = resp.json() if resp.content else {}
             if data.get("code") != 0:
-                logger.error("Feishu upload_image failed [%s]: %s", role.value, data)
+                logger.error("Feishu upload_image failed [%s]: %s", str(role), data)
                 return None
             return (data.get("data") or {}).get("image_key")
 
@@ -179,7 +179,7 @@ class FeishuClient:
         chat_id: str,
         path: str,
         *,
-        role: AgentRole = AgentRole.STRATEGY,
+        role: str = "strategy",
     ) -> str | None:
         image_key = await self.upload_image(path, role=role)
         if not image_key:
@@ -200,7 +200,7 @@ class FeishuClient:
             )
             data = resp.json()
             if data.get("code") != 0:
-                logger.error("Feishu send_image failed [%s]: %s", role.value, data)
+                logger.error("Feishu send_image failed [%s]: %s", str(role), data)
                 return None
             return (data.get("data") or {}).get("message_id")
 
@@ -209,7 +209,7 @@ class FeishuClient:
         message_id: str,
         path: str,
         *,
-        role: AgentRole = AgentRole.STRATEGY,
+        role: str = "strategy",
     ) -> bool:
         image_key = await self.upload_image(path, role=role)
         if not image_key:
@@ -228,7 +228,7 @@ class FeishuClient:
             )
             data = resp.json()
             if data.get("code") != 0:
-                logger.error("Feishu reply_image failed [%s]: %s", role.value, data)
+                logger.error("Feishu reply_image failed [%s]: %s", str(role), data)
                 return False
             return True
 
@@ -237,7 +237,7 @@ class FeishuClient:
         message_id: str,
         file_key: str,
         *,
-        role: AgentRole = AgentRole.STRATEGY,
+        role: str = "strategy",
         resource_type: str = "file",
     ) -> bytes | None:
         token = await self.get_tenant_access_token(role)
@@ -250,7 +250,7 @@ class FeishuClient:
                 headers={"Authorization": f"Bearer {token}"},
             )
             if resp.status_code >= 400:
-                logger.error("Feishu file download failed [%s]: %s", role.value, resp.status_code)
+                logger.error("Feishu file download failed [%s]: %s", str(role), resp.status_code)
                 return None
             ctype = resp.headers.get("content-type", "")
             if "json" in ctype:
@@ -259,13 +259,13 @@ class FeishuClient:
                 except Exception:  # noqa: BLE001
                     payload = {}
                 if isinstance(payload, dict) and payload.get("code") not in (0, None):
-                    logger.error("Feishu file download error [%s]: %s", role.value, payload)
+                    logger.error("Feishu file download error [%s]: %s", str(role), payload)
                     return None
             return resp.content
 
     async def upsert_task_record(self, state: WorkflowState) -> None:
         s = self.settings
-        role = AgentRole.OPS
+        role = "ops"
         if not (self.configured(role) and s.feishu_bitable_app_token and s.feishu_table_tasks):
             return
         token = await self.get_tenant_access_token(role)
@@ -291,7 +291,7 @@ class FeishuClient:
         if os.environ.get("PYTEST_CURRENT_TEST"):
             return
         s = self.settings
-        role = AgentRole.STRATEGY
+        role = "strategy"
         if not (
             self.configured(role)
             and s.feishu_bitable_app_token
@@ -317,7 +317,7 @@ class FeishuClient:
         if os.environ.get("PYTEST_CURRENT_TEST"):
             return
         s = self.settings
-        role = AgentRole.STRATEGY
+        role = "strategy"
         if not (
             self.configured(role)
             and s.feishu_bitable_app_token
@@ -353,10 +353,10 @@ class FeishuClient:
     async def verify_all_tokens(self) -> dict[str, Any]:
         """探测五岗 tenant_access_token 是否可用."""
         result: dict[str, Any] = {}
-        for role in AgentRole:
+        for role in resolve_staff_apps():
             app = self.app_for(role)
             token = await self.get_tenant_access_token(role)
-            result[role.value] = {
+            result[str(role)] = {
                 "title": app.title,
                 "app_id": app.app_id,
                 "ok": bool(token),
