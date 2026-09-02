@@ -4,7 +4,7 @@ from typing import Any
 
 from matrixsolo.config import get_settings
 from matrixsolo.feishu.client import FeishuClient
-from matrixsolo.feishu.staff import AgentRole, ROLE_TITLES
+from matrixsolo.feishu.staff import ROLE_TITLES, AgentRole
 from matrixsolo.models import WorkflowState
 
 
@@ -20,7 +20,13 @@ class HitlCards:
         self.client = client or FeishuClient()
         self.settings = get_settings()
 
-    async def _send(self, card: dict[str, Any], role: AgentRole) -> str | None:
+    async def _send(
+        self,
+        card: dict[str, Any],
+        role: AgentRole,
+        *,
+        chat_id: str | None = None,
+    ) -> str | None:
         # 卡片标题前缀岗位名，便于群内识别发言人
         header = card.get("header") or {}
         title = (header.get("title") or {}).get("content") or ""
@@ -35,10 +41,10 @@ class HitlCards:
             }
             card = {**card, "header": header}
 
-        chat_id = self.settings.feishu_hitl_chat_id
-        if not chat_id:
+        target = (chat_id or "").strip() or self.settings.feishu_hitl_chat_id
+        if not target:
             return await self.client.send_interactive("local", card, role=role)
-        return await self.client.send_interactive(chat_id, card, role=role)
+        return await self.client.send_interactive(target, card, role=role)
 
     async def send_topic_card(self, state: WorkflowState) -> str | None:
         elements: list[dict[str, Any]] = []
@@ -103,7 +109,7 @@ class HitlCards:
             },
             "elements": elements,
         }
-        return await self._send(card, AgentRole.STRATEGY)
+        return await self._send(card, AgentRole.STRATEGY, chat_id=state.hitl_chat_id or None)
 
     async def send_script_card(self, state: WorkflowState) -> str | None:
         script = state.script
@@ -175,7 +181,7 @@ class HitlCards:
             },
             "elements": elements,
         }
-        return await self._send(card, AgentRole.SCRIPT)
+        return await self._send(card, AgentRole.SCRIPT, chat_id=state.hitl_chat_id or None)
 
     async def send_cover_notice(self, state: WorkflowState) -> str | None:
         """视觉岗通知：封面 A/B 已生成."""
@@ -204,7 +210,7 @@ class HitlCards:
                 }
             ],
         }
-        return await self._send(card, AgentRole.VISUAL)
+        return await self._send(card, AgentRole.VISUAL, chat_id=state.hitl_chat_id or None)
 
     async def send_final_card(self, state: WorkflowState) -> str | None:
         render = state.render
@@ -283,7 +289,7 @@ class HitlCards:
             "elements": elements,
         }
         # 成片由剪辑岗提交终审；发布动作由运营岗在通过后执行
-        return await self._send(card, AgentRole.EDITOR)
+        return await self._send(card, AgentRole.EDITOR, chat_id=state.hitl_chat_id or None)
 
     async def send_distribution_notice(self, state: WorkflowState) -> str | None:
         if not state.distributions:
@@ -307,7 +313,7 @@ class HitlCards:
         }
         # fix typo in title
         card["header"]["title"]["content"] = "多平台排期已就绪"
-        return await self._send(card, AgentRole.OPS)
+        return await self._send(card, AgentRole.OPS, chat_id=state.hitl_chat_id or None)
 
     async def send_alert_card(self, state: WorkflowState) -> str | None:
         issues = "\n".join(f"- {x}" for x in state.safety_messages) or "高危内容"
@@ -330,4 +336,4 @@ class HitlCards:
                 }
             ],
         }
-        return await self._send(card, AgentRole.SCRIPT)
+        return await self._send(card, AgentRole.SCRIPT, chat_id=state.hitl_chat_id or None)

@@ -26,6 +26,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </div>
             <nav className="nav">
               <Link href="/">系统总览</Link>
+              <Link href="/departments">部门与群</Link>
               <Link href="/employees">员工</Link>
               <Link href="/agents">岗位配置</Link>
               <Link href="/models">模型中心</Link>

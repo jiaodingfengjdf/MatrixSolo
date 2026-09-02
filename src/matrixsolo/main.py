@@ -13,7 +13,12 @@ from matrixsolo import __version__
 from matrixsolo.admin import admin_router
 from matrixsolo.analytics import ReviewEngine
 from matrixsolo.config import get_settings
-from matrixsolo.feishu.chat import get_chat_worker, handle_card_action, handle_im_message, extract_card_value
+from matrixsolo.feishu.chat import (
+    extract_card_value,
+    get_chat_worker,
+    handle_card_action,
+    handle_im_message,
+)
 from matrixsolo.feishu.staff import staff_status
 from matrixsolo.models import HitlAction
 from matrixsolo.orchestration import ProductionOrchestrator, WorkflowStore
@@ -63,6 +68,7 @@ class StartRequest(BaseModel):
     content_form: str | None = Field(default=None, description="逐帧解说/混剪盘点/影评漫谈/幕后花絮")
     audience_profile: str | None = None
     custom_note: str | None = None
+    department_id: str | None = None
     auto_demo: bool = Field(default=False, description="本地演示：自动通过三道 HITL")
 
 
@@ -107,6 +113,7 @@ async def start_workflow(body: StartRequest) -> dict[str, Any]:
         content_form=body.content_form,
         audience_profile=body.audience_profile,
         custom_note=body.custom_note,
+        department_id=body.department_id,
     )
     if body.auto_demo:
         state = await orchestrator.auto_approve_demo(state.workflow_id)

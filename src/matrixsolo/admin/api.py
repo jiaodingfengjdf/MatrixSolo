@@ -14,6 +14,12 @@ from matrixsolo.admin.employees import (
     get_employee_store,
 )
 from matrixsolo.admin.mcp_runtime import RoleMcpRuntime
+from matrixsolo.admin.departments import (
+    DepartmentChatBind,
+    DepartmentCreate,
+    DepartmentUpdate,
+    get_department_store,
+)
 from matrixsolo.admin.model_center import (
     ModelProviderCreate,
     ModelProviderUpdate,
@@ -225,6 +231,85 @@ async def delete_model_slot(slot_id: str) -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 # 员工入职 / 一键润色 / 工具审计（PRD 模块 8 / 2）
 # --------------------------------------------------------------------------- #
+@router.get("/departments")
+async def list_departments() -> dict[str, Any]:
+    return {"items": [d.model_dump(mode="json") for d in get_department_store().list()]}
+
+
+@router.get("/departments/recent-chats")
+async def recent_department_chats(limit: int = 40) -> dict[str, Any]:
+    from matrixsolo.admin.studio_memory import recent_feishu_traces
+
+    seen: dict[str, dict[str, Any]] = {}
+    for row in recent_feishu_traces(limit=400):
+        chat_id = str(row.get("chat_id") or "").strip()
+        if not chat_id or chat_id in seen:
+            continue
+        seen[chat_id] = {
+            "chat_id": chat_id,
+            "last_text": str(row.get("text") or "")[:80],
+            "ts": str(row.get("ts") or ""),
+        }
+        if len(seen) >= limit:
+            break
+    return {"items": list(seen.values())}
+
+
+@router.post("/departments")
+async def create_department(body: DepartmentCreate) -> dict[str, Any]:
+    try:
+        department = get_department_store().create(body)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return department.model_dump(mode="json")
+
+
+@router.put("/departments/{department_id}")
+async def update_department(
+    department_id: str, body: DepartmentUpdate
+) -> dict[str, Any]:
+    try:
+        department = get_department_store().update(department_id, body)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return department.model_dump(mode="json")
+
+
+@router.delete("/departments/{department_id}")
+async def delete_department(department_id: str) -> dict[str, Any]:
+    try:
+        get_department_store().delete(department_id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return {"ok": True}
+
+
+@router.post("/departments/{department_id}/bind-chat")
+async def bind_department_chat(
+    department_id: str, body: DepartmentChatBind
+) -> dict[str, Any]:
+    try:
+        department = get_department_store().bind_chat(department_id, body.chat_id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return department.model_dump(mode="json")
+
+
+@router.post("/departments/{department_id}/unbind")
+async def unbind_department_chat(department_id: str) -> dict[str, Any]:
+    try:
+        department = get_department_store().update(
+            department_id, DepartmentUpdate(chat_id="", hitl_chat_id="")
+        )
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return department.model_dump(mode="json")
+
+
 @router.get("/employees")
 async def list_employees() -> dict[str, Any]:
     return {"items": [e.dump_admin() for e in get_employee_store().list()]}

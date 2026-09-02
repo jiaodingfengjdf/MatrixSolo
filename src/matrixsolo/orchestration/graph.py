@@ -36,6 +36,27 @@ def _dump(wf: WorkflowState) -> dict[str, Any]:
     return wf.model_dump(mode="json")
 
 
+def _department_skips_editor(wf: WorkflowState) -> bool:
+    """部门成员不含 editor 职能 → 跳过真实剪辑渲染（图文 copy_pack 终审）."""
+    if not wf.department_id or wf.department_id == "default":
+        return False
+    from matrixsolo.admin.departments import get_department_store
+
+    department = get_department_store().get(wf.department_id)
+    if not department:
+        return False
+    functions: set[str] = set()
+    for employee_id in department.member_employee_ids or []:
+        if employee_id in {"strategy", "script", "visual", "editor", "ops"}:
+            functions.add(employee_id)
+            continue
+        from matrixsolo.admin.employees import get_employee_store
+
+        employee = get_employee_store().get(employee_id)
+        functions.add((employee.function if employee else employee_id) or employee_id)
+    return "editor" not in functions
+
+
 class ProductionOrchestrator:
     """LangGraph DAG：strategy → HITL1 → script → HITL2 → visual/audio/render → HITL3 → ops.
 
@@ -163,6 +184,23 @@ class ProductionOrchestrator:
             wf = _load(state)
             wf.status = WorkflowStatus.RENDERING
             wf.log("LangGraph → render")
+            # 图文模板（无 editor 成员）跳过真实剪辑渲染，产出 copy_pack 供终审
+            if _department_skips_editor(wf):
+                from matrixsolo.models import RenderResult
+
+                title = (
+                    (wf.script.selected_title if wf.script else "")
+                    or (wf.selected_topic.film_name if wf.selected_topic else "")
+                    or ""
+                )
+                wf.render = RenderResult(
+                    preview_path=f"copy_pack://{wf.department_id}/{title}",
+                    compliance_score=1.0,
+                    compliance_report={"mode": "copy_pack", "department_id": wf.department_id},
+                )
+                wf.log("图文模板：跳过剪辑渲染，产出 copy_pack 终审")
+                self.store.save(wf)
+                return {**state, "workflow": _dump(wf)}
             wf = await self.post.render_via_mcp(wf)
             return {**state, "workflow": _dump(wf)}
 
@@ -216,6 +254,8 @@ class ProductionOrchestrator:
                 status="done",
                 summary=f"生产 DAG 完成：{wf.trigger} / {wf.content_form.value}",
                 workflow_id=wf.workflow_id,
+                department_id=wf.department_id,
+                department_name=wf.department_name,
                 stage="distribute",
                 employee_id="ops",
                 employee_title="运营",
@@ -319,8 +359,17 @@ class ProductionOrchestrator:
         content_form: str | None = None,
         audience_profile: str | None = None,
         custom_note: str | None = None,
+        department_id: str | None = None,
     ) -> WorkflowState:
         state = WorkflowState(trigger=trigger)
+        if department_id:
+            from matrixsolo.admin.departments import get_department_store
+
+            department = get_department_store().get(department_id)
+            if department:
+                state.department_id = department.id
+                state.department_name = department.name
+                state.hitl_chat_id = department.target_chat_id()
         if audience_profile:
             state.audience_profile = audience_profile
         if content_form:
@@ -409,6 +458,8 @@ class ProductionOrchestrator:
             status="blocked" if state.status.value.startswith("awaiting_") else "done",
             summary=f"HITL-{stage} {action.value}",
             workflow_id=workflow_id,
+            department_id=state.department_id,
+            department_name=state.department_name,
             stage=stage,
             employee_id="strategy",
             employee_title="总编",

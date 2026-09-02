@@ -35,9 +35,25 @@ def huddle_job(text: str) -> str:
     return "talk"
 
 
-def _ctx_block() -> str:
-    ctx = format_studio_context()
+def _ctx_block(department_id: str = "default") -> str:
+    ctx = format_studio_context(department_id)
     return f"{ctx}\n\n" if ctx else ""
+
+
+def _member_functions(member_ids: list[str]) -> set[str]:
+    out: set[str] = set()
+    for eid in member_ids or []:
+        if eid in {"strategy", "script", "visual", "editor", "ops"}:
+            out.add(eid)
+            continue
+        try:
+            from matrixsolo.admin.employees import get_employee_store
+
+            employee = get_employee_store().get(eid)
+            out.add((employee.function if employee else eid) or eid)
+        except Exception:  # noqa: BLE001
+            out.add(eid)
+    return out
 
 
 class HuddleState(TypedDict, total=False):
@@ -45,6 +61,8 @@ class HuddleState(TypedDict, total=False):
     user_text: str
     chat_id: str
     message_id: str
+    department_id: str
+    department_name: str
     need_visual: bool
     need_script: bool
     need_editor: bool
@@ -90,7 +108,7 @@ class StudioHuddle:
                 reply = await _text_role(
                     "strategy",
                     (
-                        f"{_ctx_block()}"
+                        f"{_ctx_block(state.get('department_id') or 'default')}"
                         "你是总编沈策。老板在群里说话，没点名也要你先接。这是五岗流水线第一棒。\n"
                         "用 2～4 句接住老板的话，点一下后面视觉/文案/剪辑/运营会按序接。\n"
                         "不要布置新的出图任务，不要问老板选哪条。禁止 <think>。\n\n"
@@ -159,7 +177,7 @@ class StudioHuddle:
                 reply = await _text_role(
                     "visual",
                     (
-                        f"{_ctx_block()}"
+                        f"{_ctx_block(state.get('department_id') or 'default')}"
                         "你是顾帧。老板没点名也要你接一句画面侧的话。不要生图、不要问主色。\n"
                         f"老板原话：{state.get('user_text')}\n2～3 句。禁止 <think>。"
                     ),
@@ -245,7 +263,7 @@ class StudioHuddle:
                 reply = await _text_role(
                     "script",
                     (
-                        f"{_ctx_block()}"
+                        f"{_ctx_block(state.get('department_id') or 'default')}"
                         "你是林钩。老板没点名也要你接一句文案侧的话。禁止调生图、禁止 JSON。\n"
                         f"老板原话：{state.get('user_text')}\n2～3 句。禁止 <think>。"
                     ),
@@ -277,7 +295,7 @@ class StudioHuddle:
                 reply = await _text_role(
                     "editor",
                     (
-                        f"{_ctx_block()}"
+                        f"{_ctx_block(state.get('department_id') or 'default')}"
                         "你是阿刀。老板没点名也要你接一句成片侧的话。不要布置新剪辑任务。\n"
                         f"老板原话：{state.get('user_text')}\n2～3 句。禁止 <think>。"
                     ),
@@ -304,7 +322,7 @@ class StudioHuddle:
                 reply = await _text_role(
                     "ops",
                     (
-                        f"{_ctx_block()}"
+                        f"{_ctx_block(state.get('department_id') or 'default')}"
                         "你是周航。老板没点名也要你接一句排期/平台侧的话。不要改画面。\n"
                         f"老板原话：{state.get('user_text')}\n2～3 句。禁止 <think>。"
                     ),
@@ -433,13 +451,33 @@ class StudioHuddle:
         user_text: str,
         chat_id: str,
         message_id: str,
+        department_id: str = "default",
+        department_name: str = "默认",
         need_visual: bool = True,
         need_script: bool = True,
         need_editor: bool = True,
         need_ops: bool = True,
         job: str = "poster",
     ) -> WorkflowState:
+        from matrixsolo.admin.departments import get_department_store
+
+        dept = None
+        if department_id and department_id != "default":
+            dept = get_department_store().get(department_id)
+        if dept:
+            department_name = dept.name or department_name
+            functions = _member_functions(dept.member_employee_ids)
+            need_visual = "visual" in functions
+            need_script = "script" in functions
+            need_editor = "editor" in functions
+            need_ops = "ops" in functions
+        else:
+            department_id = department_id or "default"
+
         wf = WorkflowState(trigger="feishu_huddle")
+        wf.department_id = department_id
+        wf.department_name = department_name
+        wf.hitl_chat_id = chat_id
         wf.log("飞书 huddle 启动")
         self.store.save(wf)
         result = await self._graph.ainvoke(
@@ -448,6 +486,8 @@ class StudioHuddle:
                 "user_text": user_text,
                 "chat_id": chat_id,
                 "message_id": message_id,
+                "department_id": department_id,
+                "department_name": department_name,
                 "need_visual": need_visual,
                 "need_script": need_script,
                 "need_editor": need_editor,
@@ -460,6 +500,7 @@ class StudioHuddle:
         save_studio_context(
             chat_id=chat_id,
             workflow_id=done.workflow_id,
+            department_id=department_id,
             job=str(result.get("job") or job),
             film_name=str(result.get("film_name") or (done.selected_topic.film_name if done.selected_topic else "")),
             angle=str(result.get("angle") or ""),
@@ -480,6 +521,8 @@ class StudioHuddle:
             summary=f"{job_name} huddle 完成：{result.get('angle') or ''} / {result.get('mood') or ''}",
             workflow_id=done.workflow_id,
             chat_id=chat_id,
+            department_id=department_id,
+            department_name=department_name,
             stage="huddle",
             employee_id="strategy",
             employee_title="总编",
@@ -493,6 +536,8 @@ class StudioHuddle:
                     "film": film,
                     "slot": "18:00",
                     "date": date.today().isoformat(),
+                    "department_id": department_id,
+                    "department_name": department_name,
                     "potential": 0,
                     "reason": str(result.get("brief") or result.get("angle") or job_name),
                 }
@@ -533,6 +578,8 @@ async def run_studio_huddle(
     chat_id: str,
     message_id: str,
     mentioned: set[AgentRole],
+    department_id: str | None = None,
+    department_name: str = "默认",
 ) -> WorkflowState:
     _ = mentioned
     text = user_text or ""
@@ -541,6 +588,8 @@ async def run_studio_huddle(
         user_text=text,
         chat_id=chat_id,
         message_id=message_id,
+        department_id=department_id or "default",
+        department_name=department_name,
         need_visual=True,
         need_script=True,
         need_editor=True,

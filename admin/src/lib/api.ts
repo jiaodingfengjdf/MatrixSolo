@@ -150,6 +150,25 @@ export type ToolAudit = {
   duration_ms: number;
 };
 
+export type Department = {
+  id: string;
+  name: string;
+  platform: "toutiao" | "douyin" | "bilibili" | "other";
+  chat_id: string;
+  hitl_chat_id: string;
+  member_employee_ids: string[];
+  pipeline_template: string[];
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type RecentChat = {
+  chat_id: string;
+  last_text: string;
+  ts: string;
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     headers: {
@@ -324,6 +343,25 @@ export const api = {
     });
     return request<{ items: ToolAudit[] }>(`/api/admin/tool-audit?${qs.toString()}`);
   },
+  // 部门与群
+  listDepartments: () => request<{ items: Department[] }>("/api/admin/departments"),
+  createDepartment: (body: Partial<Department>) =>
+    request<Department>("/api/admin/departments", { method: "POST", body: JSON.stringify(body) }),
+  updateDepartment: (id: string, body: Partial<Department>) =>
+    request<Department>(`/api/admin/departments/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  deleteDepartment: (id: string) =>
+    request<{ ok: boolean }>(`/api/admin/departments/${id}`, { method: "DELETE" }),
+  bindDepartmentChat: (id: string, chat_id: string) =>
+    request<Department>(`/api/admin/departments/${id}/bind-chat`, {
+      method: "POST",
+      body: JSON.stringify({ chat_id }),
+    }),
+  unbindDepartmentChat: (id: string) =>
+    request<Department>(`/api/admin/departments/${id}/unbind`, { method: "POST" }),
+  recentChats: () => request<{ items: RecentChat[] }>("/api/admin/departments/recent-chats"),
 };
 
 export type StudioBoard = {

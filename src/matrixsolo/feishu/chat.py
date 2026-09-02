@@ -129,6 +129,26 @@ def resolve_role_from_event(payload: dict[str, Any]) -> str | None:
     return None
 
 
+def resolve_department_for_chat(chat_id: str) -> dict[str, Any] | None:
+    """chat_id → 部门；未绑群但等于 FEISHU_HITL_CHAT_ID 时视为默认部门."""
+    from matrixsolo.admin.departments import get_department_store
+
+    department = get_department_store().resolve_by_chat(chat_id)
+    if department:
+        return {
+            "id": department.id,
+            "name": department.name,
+            "members": list(department.member_employee_ids),
+        }
+    if chat_id and chat_id == get_settings().feishu_hitl_chat_id:
+        return {
+            "id": "default",
+            "name": "默认",
+            "members": ["strategy", "script", "visual", "editor", "ops"],
+        }
+    return None
+
+
 URL_RE = re.compile(r"https?://[^\s<>\"']+")
 INSTALL_WORDS = ("安装", "学会", "学习", "技能", "skill", "skill.md")
 RADAR_ASK = re.compile(r"选题|热榜|做什么|干什么|拍什么|今天|档期|内容日历|不知道")
@@ -401,6 +421,10 @@ async def handle_im_message(payload: dict[str, Any]) -> dict[str, Any]:
     if not chat_id:
         return {"code": 0, "msg": "empty"}
 
+    department = resolve_department_for_chat(chat_id)
+    department_id = (department or {}).get("id") or "default"
+    department_name = (department or {}).get("name") or "默认"
+
     if is_install_intent(text, file_name):
         reply = await _install_skill_from_message(role, text, message_id, file_key, file_name)
         await _deliver(role, chat_id, message_id, reply)
@@ -426,6 +450,14 @@ async def handle_im_message(payload: dict[str, Any]) -> dict[str, Any]:
         stamp=stamp,
     )
     if huddle:
+        if not department:
+            await _deliver(
+                "strategy",
+                chat_id,
+                message_id,
+                "这个群还没绑定部门。先在后台「部门与群」绑定 chat_id 再开工。",
+            )
+            return {"code": 0, "msg": "unbound-group", "role": role}
         claim = huddle_claim_id(chat_id, message_id, text)
         if not try_claim_huddle(claim, str(role)):
             _trace_feishu("skip-claimed", role=str(role), claim=claim, text=text[:80])
@@ -443,11 +475,13 @@ async def handle_im_message(payload: dict[str, Any]) -> dict[str, Any]:
             chat_id=chat_id,
             message_id=message_id,
             mentioned=mentioned or {role},
+            department_id=department_id,
+            department_name=department_name,
         )
-        return {"code": 0, "msg": "huddle", "role": role}
+        return {"code": 0, "msg": "huddle", "role": role, "department_id": department_id}
 
     logger.info("Feishu chat role=%s text=%s", role, text[:80])
-    reply, images = await _generate_reply(role, text)
+    reply, images = await _generate_reply(role, text, department_id=department_id)
     await _deliver(role, chat_id, message_id, reply, images)
     return {"code": 0, "msg": "replied", "role": role}
 
@@ -585,7 +619,12 @@ async def _install_skill_from_message(
         return f"安装技能时卡住了：{exc}"
 
 
-async def _generate_reply(role: str, user_text: str) -> tuple[str, list[str]]:
+async def _generate_reply(
+    role: str,
+    user_text: str,
+    *,
+    department_id: str = "default",
+) -> tuple[str, list[str]]:
     from matrixsolo.admin.chat_memory import as_chat_messages, remember
     from matrixsolo.admin.store import get_profile_store
     from matrixsolo.skills.runtime import (
@@ -638,7 +677,7 @@ async def _generate_reply(role: str, user_text: str) -> tuple[str, list[str]]:
             user_payload += "\n".join(observations) + "\n\n"
         from matrixsolo.admin.studio_memory import format_studio_context
 
-        studio = format_studio_context()
+        studio = format_studio_context(department_id)
         if studio:
             user_payload += studio + "\n\n"
         user_payload += user_text

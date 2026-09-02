@@ -58,7 +58,9 @@ pytest -q
 - **P0 已落地**：模型中心 / Prompt OS（L0 + 版本回滚）/ 每日工作记录 / 后台导航与总览 / Gateway 能力槽位
 - **P1 已落地**：员工动态注册表与入职向导、一键润色（七块人设草稿→编辑→保存）、WS 按注册表热重载、
   Skill 可执行闭环 + MCP stdio 最小可用、`data/admin/tool_audit.jsonl` 工具审计页
-- P2 部门与多群隔离、P3 数字人 + vision/video 为后续里程碑
+- **P2 已落地**：部门实体与预置模板（头条图文/抖音/B站）、`chat_id` 唯一绑定、部门级 huddle 成员裁剪、
+  部门级工作室记忆/日历/工作记录隔离、HITL 打到部门群、无 editor 模板跳过剪辑（copy_pack 终审）
+- P3 数字人 + vision/video 为后续里程碑
 
 ## 核心 API
 

@@ -113,6 +113,9 @@ class WorkflowState(BaseModel):
     trigger: str = "manual"
     audience_profile: str = "泛影视爱好者 / 都市白领"
     content_form: ContentForm = ContentForm.FRAME_BY_FRAME
+    department_id: str = "default"
+    department_name: str = "默认"
+    hitl_chat_id: str = ""
 
     topics: list[TopicCandidate] = Field(default_factory=list)
     selected_topic: TopicCandidate | None = None

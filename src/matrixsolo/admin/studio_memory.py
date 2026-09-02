@@ -17,6 +17,15 @@ def _studio_path() -> Path:
     return root / "studio_huddle.json"
 
 
+def _studio_dept_path(department_id: str) -> Path:
+    root = get_settings().data_dir / "admin" / "studio_huddle"
+    root.mkdir(parents=True, exist_ok=True)
+    safe = (department_id or "default").replace("/", "_").replace("\\", "_")
+    if safe in ("", "default"):
+        return get_settings().data_dir / "admin" / "studio_huddle.json"
+    return root / f"{safe}.json"
+
+
 def _calendar_path() -> Path:
     root = get_settings().data_dir / "admin"
     root.mkdir(parents=True, exist_ok=True)
@@ -27,6 +36,7 @@ def save_studio_context(
     *,
     chat_id: str = "",
     workflow_id: str = "",
+    department_id: str = "default",
     job: str = "",
     film_name: str = "",
     angle: str = "",
@@ -40,6 +50,7 @@ def save_studio_context(
         "ts": datetime.now(timezone.utc).isoformat(),
         "chat_id": chat_id,
         "workflow_id": workflow_id,
+        "department_id": department_id,
         "job": job,
         "film_name": film_name,
         "angle": angle,
@@ -50,15 +61,15 @@ def save_studio_context(
         "image_paths": [p for p in (image_paths or []) if p][:6],
     }
     with _lock:
-        _studio_path().write_text(
+        _studio_dept_path(department_id).write_text(
             json.dumps(record, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
     return record
 
 
-def load_studio_context() -> dict[str, Any] | None:
-    path = _studio_path()
+def load_studio_context(department_id: str = "default") -> dict[str, Any] | None:
+    path = _studio_dept_path(department_id)
     if not path.is_file():
         return None
     try:
@@ -68,8 +79,8 @@ def load_studio_context() -> dict[str, Any] | None:
     return data if isinstance(data, dict) else None
 
 
-def format_studio_context(limit: int = 600) -> str:
-    data = load_studio_context()
+def format_studio_context(department_id: str = "default", limit: int = 600) -> str:
+    data = load_studio_context(department_id)
     if not data:
         return ""
     film = str(data.get("film_name") or "").strip()
